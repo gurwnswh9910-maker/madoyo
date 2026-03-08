@@ -1,0 +1,23 @@
+fastapi
+uvicorn
+gunicorn
+pydantic
+sqlalchemy
+psycopg2-binary
+python-dotenv
+celery
+redis
+passlib[bcrypt]
+pyjwt
+bcrypt
+google-genai
+pandas
+openpyxl
+requests
+jinja2
+python-multipart
+# AI/임베딩 관련 (기존 코드 의존성)
+numpy
+scikit-learn
+google-generativeai
+sentence-transformers

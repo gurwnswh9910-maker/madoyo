@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 카피 생성기 SaaS</title>
+  
+  <!-- Pretendard 폰트 -->
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+  
+  <!-- Tailwind CSS (CDN으로 바로 사용) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #13131a;
+      --bg-card: #1a1a24;
+      --accent-primary: #6c5ce7;
+      --text-main: #f0f0f5;
+      --text-muted: #8888a0;
+    }
+    
+    body {
+      font-family: 'Pretendard', sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-main);
+    }
+    
+    .glass-panel {
+      background: var(--bg-card);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+
+    [x-cloak] { display: none !important; }
+
+    /* 로딩 스피너 애니메이션 */
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+    .spinner {
+      border: 4px solid rgba(255,255,255,0.1);
+      border-top-color: var(--accent-primary);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+    }
+
+    /* 커스텀 스크롤바 */
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg-primary); }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+  </style>
+  
+  <!-- Alpine.js (초경량 리액트 대체 프레임워크) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <div id="app" x-data="copyGeneratorApp()" class="flex-1 w-full max-w-7xl mx-auto p-4 md:p-8 flex flex-col">
+    
+    <!-- 네비게이션 -->
+    <header class="flex justify-between items-center pb-6 border-b border-gray-800 mb-8">
+      <div class="flex items-center gap-2 cursor-pointer" @click="view = 'landing'">
+        <i data-lucide="sparkles" style="color: var(--accent-primary)"></i>
+        <h1 class="text-xl font-bold">CopyGen SaaS</h1>
+      </div>
+      <nav class="flex gap-6">
+        <button @click="view = 'generator'" :class="view === 'generator' ? 'text-[var(--accent-primary)] font-semibold' : 'text-gray-400 hover:text-white'" class="flex items-center gap-2 transition-colors">
+          <i data-lucide="layout-dashboard" class="w-5 h-5"></i> 카피 생성
+        </button>
+        <button @click="view = 'history'" :class="view === 'history' ? 'text-[var(--accent-primary)] font-semibold' : 'text-gray-400 hover:text-white'" class="flex items-center gap-2 transition-colors">
+          <i data-lucide="history" class="w-5 h-5"></i> 히스토리
+        </button>
+      </nav>
+    </header>
+
+    <!-- 뷰 컨테이너 -->
+    <main class="flex-1 w-full relative">
+      
+      <!-- 1. 랜딩 뷰 -->
+      <div x-show="view === 'landing'" x-collapse>
+        <div class="flex flex-col items-center justify-center py-12 md:py-24 text-center">
+          <div class="px-4 py-1 rounded-full text-sm font-bold mb-6 border border-[#6c5ce7] text-[#6c5ce7] bg-[#6c5ce7]/10">MAB 전략 최적화 AI</div>
+          <h2 class="text-4xl md:text-6xl font-extrabold mb-6 leading-tight">
+            터지는 SNS 게시물,<br/>
+            <span class="bg-gradient-to-r from-[#6c5ce7] to-[#a29bfe] bg-clip-text text-transparent">15초 만에 완성하세요</span>
+          </h2>
+          <p class="text-xl text-gray-400 mb-10 max-w-2xl">
+            수천 개의 성공적인 게시물을 학습한 AI가 당신의 제품에 가장 알맞은 소구점과 전략을 찾아 카피를 작성해 드립니다.
+          </p>
+          <button @click="view = 'generator'" class="bg-[#6c5ce7] hover:bg-[#5a4bcf] text-white px-8 py-4 rounded-xl font-bold text-lg flex items-center gap-2 transition-all shadow-[0_0_20px_rgba(108,92,231,0.4)]">
+            <i data-lucide="zap"></i> 지금 바로 시작하기
+          </button>
+        </div>
+      </div>
+
+      <!-- 2. 제너레이터 뷰 -->
+      <div x-show="view === 'generator'" x-cloak class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        <!-- 왼쪽: 입력 영역 -->
+        <div class="lg:col-span-4">
+          <div class="glass-panel p-6 rounded-2xl sticky top-8">
+            <h3 class="text-lg font-bold mb-6">최고의 효율을 내는 카피 만들기</h3>
+            
+            <!-- 탭 -->
+            <div class="flex flex-wrap gap-2 mb-6 pb-4 border-b border-gray-800">
+              <button @click="inputType = 'text'" :class="inputType === 'text' ? 'bg-[#6c5ce7] text-white font-semibold' : 'text-gray-400'" class="px-3 py-1.5 rounded-full text-sm flex items-center gap-1 transition-colors">
+                <i data-lucide="type" class="w-4 h-4"></i>텍스트만
+              </button>
+              <button @click="inputType = 'image'" :class="inputType === 'image' ? 'bg-[#6c5ce7] text-white font-semibold' : 'text-gray-400'" class="px-3 py-1.5 rounded-full text-sm flex items-center gap-1 transition-colors">
+                <i data-lucide="image" class="w-4 h-4"></i>사진만
+              </button>
+              <button @click="inputType = 'both'" :class="inputType === 'both' ? 'bg-[#6c5ce7] text-white font-semibold' : 'text-gray-400'" class="px-3 py-1.5 rounded-full text-sm flex items-center gap-1 transition-colors">
+                <i data-lucide="layout" class="w-4 h-4"></i>텍스트+사진
+              </button>
+              <button @click="inputType = 'url'" :class="inputType === 'url' ? 'bg-[#6c5ce7] text-white font-semibold' : 'text-gray-400'" class="px-3 py-1.5 rounded-full text-sm flex items-center gap-1 transition-colors">
+                <i data-lucide="link" class="w-4 h-4"></i>URL 입력
+              </button>
+            </div>
+
+            <!-- 입력 필드 -->
+            <div class="space-y-4 mb-6">
+              <template x-if="['text', 'both'].includes(inputType)">
+                <textarea x-model="inputs.text" class="w-full h-32 bg-[var(--bg-secondary)] border border-gray-700 rounded-xl p-4 text-white placeholder-gray-500 focus:border-[#6c5ce7] focus:ring-1 focus:ring-[#6c5ce7] outline-none transition-all resize-y" placeholder="제품의 소구점이나 초기 카피안을 적어주세요. (예: 여름용 쿨링 스틱, 피부 열감 잡아줌)"></textarea>
+              </template>
+              
+              <template x-if="['image', 'both'].includes(inputType)">
+                <input x-model="inputs.imageUrl" type="text" class="w-full bg-[var(--bg-secondary)] border border-gray-700 rounded-xl p-4 text-white placeholder-gray-500 focus:border-[#6c5ce7] focus:ring-1 focus:ring-[#6c5ce7] outline-none transition-all" placeholder="이미지 주소(URL)를 입력하세요" />
+              </template>
+
+              <template x-if="inputType === 'url'">
+                <input x-model="inputs.url" type="text" class="w-full bg-[var(--bg-secondary)] border border-gray-700 rounded-xl p-4 text-white placeholder-gray-500 focus:border-[#6c5ce7] focus:ring-1 focus:ring-[#6c5ce7] outline-none transition-all" placeholder="게시물 링크 URL을 입력하세요" />
+              </template>
+            </div>
+
+            <!-- 생성 버튼 -->
+            <button 
+              @click="generateCopy" 
+              :disabled="isGenerating || isInputEmpty"
+              :class="(isGenerating || isInputEmpty) ? 'bg-gray-800 text-gray-500 cursor-not-allowed' : 'bg-[#6c5ce7] hover:bg-[#5a4bcf] text-white'"
+              class="w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors">
+              <span x-show="!isGenerating">카피 생성하기 🚀</span>
+              <span x-show="isGenerating" class="flex items-center gap-2"><i data-lucide="loader-2" class="animate-spin w-5 h-5"></i> 생성 중...</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 오른쪽: 결과 영역 -->
+        <div class="lg:col-span-8 min-h-[500px]">
+          
+          <!-- 비어있을 때 -->
+          <div x-show="!isGenerating && results.length === 0" class="h-full border-2 border-dashed border-gray-800 rounded-2xl flex items-center justify-center text-gray-500">
+            좌측에서 입력을 완료하고 생성을 시작해보세요.
+          </div>
+
+          <!-- 로딩 화면 -->
+          <div x-show="isGenerating" class="h-full glass-panel rounded-2xl flex flex-col items-center justify-center p-12 py-32">
+            <div class="spinner mb-6"></div>
+            <h3 class="text-xl font-bold mb-2" x-text="loadingPhases[loadingPhaseIndex]">🔍 유사 게시물 분석 중...</h3>
+            <p class="text-gray-400 text-sm">보통 15~25초 정도 소요됩니다.</p>
+          </div>
+
+          <!-- 결과 카드 목록 -->
+          <div x-show="!isGenerating && results.length > 0" class="space-y-6">
+            <h3 class="text-2xl font-bold mb-4">🎉 생성된 카피 TOP 3</h3>
+            
+            <template x-for="(copy, index) in results" :key="index">
+              <div class="glass-panel rounded-xl overflow-hidden">
+                <div class="flex justify-between items-center p-4 bg-white/5 border-b border-gray-800">
+                  <div class="flex items-center gap-3">
+                    <span class="text-xl font-bold text-white" x-text="'#' + copy.rank"></span>
+                    <span class="bg-[var(--bg-primary)] px-3 py-1 rounded-full text-sm text-[var(--accent-primary)] font-medium" x-text="'🎯 ' + copy.strategy"></span>
+                  </div>
+                  <div class="text-xs text-gray-500" x-text="'MSS 예상: ' + Math.round(copy.score)"></div>
+                </div>
+                
+                <div class="p-6 text-lg leading-relaxed whitespace-pre-wrap text-gray-100" x-text="copy.copy_text"></div>
+                
+                <div class="p-4 bg-[var(--bg-secondary)] border-t border-gray-800 flex justify-end gap-3">
+                  <button @click="toggleRefineChat(index)" class="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-700 hover:bg-white/5 transition-colors">
+                    <i data-lucide="message-square-text" class="w-4 h-4"></i>
+                    <span x-text="copy.showRefine ? '수정 닫기' : 'AI 수정하기'"></span>
+                  </button>
+                  <button @click="copyToClipboard(copy.copy_text)" class="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#6c5ce7] hover:bg-[#5a4bcf] font-bold transition-colors">
+                    <i data-lucide="copy" class="w-4 h-4"></i> 복사하기
+                  </button>
+                </div>
+
+                <!-- 챗봇 수정 영역 -->
+                <div x-show="copy.showRefine" x-collapse class="bg-[var(--bg-secondary)] border-t border-gray-800 p-4">
+                  <div class="max-h-60 overflow-y-auto mb-4 space-y-3 p-2 custom-scrollbar">
+                    <template x-for="msg in copy.chatHistory">
+                      <div :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+                        <div :class="msg.role === 'user' ? 'bg-[#6c5ce7] text-white rounded-br-none' : 'glass-panel text-gray-200 rounded-bl-none'" class="px-4 py-2 rounded-2xl max-w-[80%] whitespace-pre-wrap text-sm leading-relaxed" x-text="msg.content"></div>
+                      </div>
+                    </template>
+                    <div x-show="copy.isRefining" class="flex justify-start">
+                      <div class="glass-panel text-gray-200 px-4 py-2 rounded-2xl rounded-bl-none flex items-center gap-2 text-sm">
+                        <i data-lucide="loader-2" class="animate-spin w-4 h-4"></i> 수정 중...
+                      </div>
+                    </div>
+                  </div>
+                  <div class="flex gap-2 relative">
+                    <input x-model="copy.refineInput" @keydown.enter="sendRefineRequest(index)" type="text" placeholder="더 짧게 해줘, 혹은 이모지 빼줘" class="flex-1 bg-[var(--bg-primary)] border border-gray-700 rounded-full px-5 py-2.5 text-sm text-white focus:border-[#6c5ce7] focus:ring-1 focus:ring-[#6c5ce7] outline-none transition-colors" :disabled="copy.isRefining">
+                    <button @click="sendRefineRequest(index)" :disabled="copy.isRefining || !copy.refineInput.trim()" class="bg-[#6c5ce7] hover:bg-[#5a4bcf] disabled:bg-gray-800 disabled:text-gray-500 w-10 h-10 rounded-full flex items-center justify-center transition-colors absolute right-1 top-0.5">
+                      <i data-lucide="send" class="w-4 h-4"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. 히스토리 뷰 -->
+      <div x-show="view === 'history'" x-cloak class="max-w-4xl mx-auto">
+        <h2 class="text-3xl font-bold mb-2">내 카피 히스토리</h2>
+        <p class="text-gray-400 mb-8">브라우저 로컬 저장소에 저장된 최근 생성 기록입니다.</p>
+        
+        <div x-show="history.length === 0" class="py-20 text-center text-gray-500 border-2 border-dashed border-gray-800 rounded-2xl">
+          아직 생성한 카피가 없습니다.
+        </div>
+        
+        <div class="space-y-6">
+          <template x-for="item in history" :key="item.id">
+            <div class="glass-panel p-6 rounded-xl">
+              <div class="flex justify-between items-center mb-4 pb-4 border-b border-gray-800">
+                <span class="text-sm text-gray-400" x-text="new Date(item.date).toLocaleString()"></span>
+                <span class="bg-[var(--bg-secondary)] px-3 py-1 rounded-full text-xs" x-text="item.typeBadge"></span>
+              </div>
+              <div class="mb-4 text-sm text-gray-400 truncate">
+                <strong class="text-gray-300">요청:</strong> <span x-text="item.previewInput"></span>
+              </div>
+              <div class="bg-[var(--bg-secondary)] p-4 rounded-lg">
+                <div class="text-[#6c5ce7] text-xs font-bold mb-2 break-words" x-text="'🏆 Top 1 (' + item.topResult.strategy + ')'"></div>
+                <div class="text-gray-200 whitespace-pre-wrap leading-relaxed break-words" x-text="item.topResult.copy_text"></div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+      
+    </main>
+
+    <!-- 토스트 알림 -->
+    <div x-show="toast.show" x-transition.duration.300ms class="fixed bottom-8 right-8 px-6 py-3 rounded-xl shadow-2xl font-medium text-white max-w-sm z-50 flex items-center gap-3 border border-gray-700" :class="toast.type === 'error' ? 'bg-red-900/90' : 'bg-[#6c5ce7]'">
+      <i :data-lucide="toast.type === 'error' ? 'alert-circle' : 'check-circle'" class="w-5 h-5"></i>
+      <span x-text="toast.message"></span>
+    </div>
+
+  </div>
+
+  <script>
+    // Lucide Icon 렌더링
+    document.addEventListener('alpine:init', () => {
+      lucide.createIcons();
+    });
+    
+    // API 엔드포인트 주소
+    const API_BASE = "http://localhost:8000/api";
+
+    document.addEventListener('alpine:init', () => {
+      Alpine.data('copyGeneratorApp', () => ({
+        view: 'landing', // 'landing', 'generator', 'history'
+        inputType: 'text', // 'text', 'image', 'both', 'url'
+        inputs: {
+          text: '',
+          imageUrl: '',
+          url: ''
+        },
+        
+        isGenerating: false,
+        results: [],
+        
+        loadingPhases: [
+          "🔍 유사 게시물 분석 중...",
+          "🧠 전략 도출 중...",
+          "✍️ 카피 작성 중...",
+          "📊 품질 검증 중..."
+        ],
+        loadingPhaseIndex: 0,
+        loadingInterval: null,
+
+        history: JSON.parse(localStorage.getItem('copyGenHistory') || '[]'),
+        
+        toast: {
+          show: false,
+          message: '',
+          type: 'success',
+          timeout: null
+        },
+
+        init() {
+          this.$watch('view', value => {
+            setTimeout(() => lucide.createIcons(), 50);
+            window.scrollTo(0,0);
+          });
+          this.$watch('results', () => setTimeout(() => lucide.createIcons(), 50));
+        },
+
+        get isInputEmpty() {
+          if (this.inputType === 'text') return !this.inputs.text.trim();
+          if (this.inputType === 'image') return !this.inputs.imageUrl.trim();
+          if (this.inputType === 'both') return !this.inputs.text.trim() && !this.inputs.imageUrl.trim();
+          if (this.inputType === 'url') return !this.inputs.url.trim();
+          return true;
+        },
+
+        showToast(message, type = 'success') {
+          this.toast.message = message;
+          this.toast.type = type;
+          this.toast.show = true;
+          
+          if(this.toast.timeout) clearTimeout(this.toast.timeout);
+          this.toast.timeout = setTimeout(() => {
+            this.toast.show = false;
+          }, 3000);
+          setTimeout(() => lucide.createIcons(), 10);
+        },
+
+        async copyToClipboard(text) {
+          try {
+            await navigator.clipboard.writeText(text);
+            this.showToast('클립보드에 복사되었습니다!', 'success');
+          } catch (err) {
+            this.showToast('복사에 실패했습니다.', 'error');
+          }
+        },
+
+        startLoadingAnimation() {
+          this.loadingPhaseIndex = 0;
+          let counts = 0;
+          this.loadingInterval = setInterval(() => {
+            counts++;
+            if (counts === 2) this.loadingPhaseIndex = 1;
+            if (counts === 5) this.loadingPhaseIndex = 2;
+            if (counts === 12) this.loadingPhaseIndex = 3;
+          }, 1000);
+        },
+
+        stopLoadingAnimation() {
+          if (this.loadingInterval) clearInterval(this.loadingInterval);
+        },
+
+        async generateCopy() {
+          this.isGenerating = true;
+          this.results = [];
+          this.startLoadingAnimation();
+
+          try {
+            const referText = ['text', 'both'].includes(this.inputType) ? this.inputs.text : null;
+            const referImage = ['image', 'both'].includes(this.inputType) && this.inputs.imageUrl ? [this.inputs.imageUrl] : null;
+            const referUrl = this.inputType === 'url' ? this.inputs.url : null;
+            
+            const reqBody = {
+              reference_copy: referText,
+              image_urls: referImage,
+              reference_url: referUrl
+            };
+
+            const response = await fetch(`${API_BASE}/generate`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(reqBody)
+            });
+
+            if (!response.ok) {
+              const err = await response.text();
+              throw new Error(err);
+            }
+
+            const data = await response.json();
+            
+            // UI용 상태 추가 (챗봇용)
+            this.results = data.copies.map(c => ({
+              ...c,
+              showRefine: false,
+              chatHistory: [
+                { role: 'assistant', content: '무엇을 어떻게 수정할까요? (예: 더 재미있게 써줘)' }
+              ],
+              refineInput: '',
+              isRefining: false
+            }));
+
+            this.showToast(`🔥 카피 완성! (${data.processing_time}초 소요)`);
+            
+            // 히스토리 저장 로직
+            const historyItem = {
+              id: Date.now(),
+              date: new Date().toISOString(),
+              typeBadge: this.inputType === 'url' ? 'URL형' : this.inputType === 'image' ? '이미지형' : '텍스트형',
+              previewInput: referText || referUrl || '이미지 데이터',
+              topResult: data.copies[0]
+            };
+            this.history.unshift(historyItem);
+            if(this.history.length > 50) this.history.length = 50;
+            localStorage.setItem('copyGenHistory', JSON.stringify(this.history));
+
+          } catch (error) {
+            this.showToast(`오류: FastAPI 서버가 켜져 있는지 확인하세요. (${error.message})`, 'error');
+          } finally {
+            this.stopLoadingAnimation();
+            this.isGenerating = false;
+          }
+        },
+
+        toggleRefineChat(index) {
+          this.results[index].showRefine = !this.results[index].showRefine;
+          if(this.results[index].showRefine) {
+            setTimeout(() => lucide.createIcons(), 50);
+          }
+        },
+
+        async sendRefineRequest(index) {
+          const item = this.results[index];
+          if (!item.refineInput.trim() || item.isRefining) return;
+
+          const instruction = item.refineInput;
+          item.refineInput = '';
+          
+          item.chatHistory.push({ role: 'user', content: instruction });
+          item.isRefining = true;
+
+          try {
+            // DB/API 호출을 위해 History 형태를 맞춤
+            const apiHistory = item.chatHistory.slice(0, -1).map(h => ({
+               role: h.role === 'assistant' ? 'model' : 'user', // Gemini API 롤 매핑 방지 혹은 단순전달
+               content: h.content
+            }));
+
+            const response = await fetch(`${API_BASE}/refine`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                original_copy: item.copy_text,
+                user_instruction: instruction,
+                conversation_history: apiHistory
+              })
+            });
+
+            if (!response.ok) throw new Error("수정에 실패했습니다.");
+            
+            const data = await response.json();
+            
+            // 대화 목록에 추가하고, 본문 카피 원본도 교체
+            item.chatHistory.push({ role: 'assistant', content: data.refined_copy });
+            item.copy_text = data.refined_copy;
+            
+            this.showToast('✅ 카피가 요청대로 수정되었습니다.');
+
+          } catch (error) {
+            item.chatHistory.push({ role: 'assistant', content: `🚨 오류: ${error.message}` });
+          } finally {
+            item.isRefining = false;
+          }
+        }
+      }));
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+Executable: C:\Users\ding9\AppData\Local\Python\pythoncore-3.14-64\python.exe
+Version: 3.14.2 (tags/v3.14.2:df79316, Dec  5 2025, 17:18:21) [MSC v.1944 64 bit (AMD64)]
+Cwd: C:\Users\ding9\Desktop\madoyo
+Pip path: None
+Pip module: C:\Users\ding9\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\pip\__init__.py

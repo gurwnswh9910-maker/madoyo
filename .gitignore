@@ -1,0 +1,23 @@
+# Common
+.env
+*.log
+.DS_Store
+
+# Backend
+backend/__pycache__/
+backend/*.pyc
+backend/data_cache.pkl
+backend/embeddings.pkl
+backend/temp_uploads/
+
+# Frontend
+client-next/node_modules/
+client-next/.next/
+client-next/out/
+client-next/build/
+
+# Python
+.venv/
+env/
+venv/
+ENV/
