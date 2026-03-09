@@ -1,0 +1,34 @@
+# 개발 환경 및 민감한 파일/폴더 전체 무시
+*
+
+# 제외할(Git에 올릴) 필수 서버/클라이언트 관련 폴더만 허용
+!/backend/
+!/backend/**
+!/client-next/
+!/client-next/**
+!/.gitignore
+
+# 단, 허용된 폴더 안에서도 민감한 파일/임시 파일은 무시
+# --- Backend 무시 ---
+backend/.env
+backend/.venv
+backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
+
+# --- Client 무시 ---
+client-next/.env
+client-next/.env.local
+client-next/.env.*
+client-next/node_modules/
+client-next/.next/
+client-next/out/
+client-next/build/
+
+# 추가적인 보안(혹시 모를 대용량/민감 파일 백업 차단)
+*.pkl
+*.env
+*.exe
+*.pkg
+*.key
+*.pem
