@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useRef } from "react";
 import { apiPost, pollTask } from "@/lib/api";
 import { showToast } from "@/components/layout/Toast";
 import { reportBug } from "@/lib/api";
@@ -22,18 +23,11 @@ const LOADING_PHASES = [
   "📊 품질 검증 중...",
 ];
 
-const INPUT_TABS = [
-  { key: "text", icon: "📝", label: "텍스트만" },
-  { key: "image", icon: "🖼️", label: "사진만" },
-  { key: "both", icon: "📎", label: "텍스트+사진" },
-  { key: "url", icon: "🔗", label: "URL 입력" },
-] as const;
-
 export default function GeneratePage() {
-  const [inputType, setInputType] = useState<string>("text");
   const [text, setText] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [refUrl, setRefUrl] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [results, setResults] = useState<CopyResult[]>([]);
   const [loadingPhase, setLoadingPhase] = useState(0);
@@ -41,11 +35,7 @@ export default function GeneratePage() {
   const [showPublishBanner, setShowPublishBanner] = useState(false);
   const [genId, setGenId] = useState<string | null>(null);
 
-  const isInputEmpty =
-    inputType === "text" ? !text.trim() :
-    inputType === "image" ? !imageUrl.trim() :
-    inputType === "both" ? (!text.trim() && !imageUrl.trim()) :
-    !refUrl.trim();
+  const isInputEmpty = !text.trim() && !imageUrl.trim() && !refUrl.trim();
 
   const startLoadingAnimation = () => {
     setLoadingPhase(0);
@@ -66,9 +56,9 @@ export default function GeneratePage() {
 
     try {
       const reqBody = {
-        reference_copy: ["text", "both"].includes(inputType) ? text : null,
-        image_urls: ["image", "both"].includes(inputType) && imageUrl ? [imageUrl] : null,
-        reference_url: inputType === "url" ? refUrl : null,
+        reference_copy: text.trim() ? text : null,
+        image_urls: imageUrl ? [imageUrl] : null,
+        reference_url: refUrl.trim() ? refUrl : null,
       };
 
       const response = await apiPost("/generate", reqBody);
@@ -105,10 +95,35 @@ export default function GeneratePage() {
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "알 수 없는 오류";
       showToast(`오류: ${msg}`, "error");
-      reportBug("GenerateError", msg, { inputType, text });
+      reportBug("GenerateError", msg, { text, imageUrl, refUrl });
     } finally {
       clearInterval(interval);
       setIsGenerating(false);
+    }
+  };
+
+  const handleMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/media`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error("업로드 실패");
+
+      const data = await response.json();
+      setImageUrl(data.url);
+      showToast("미디어가 첨부되었습니다.");
+    } catch (error) {
+      showToast("미디어 업로드에 실패했습니다.", "error");
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -212,45 +227,59 @@ export default function GeneratePage() {
         <div className="glass-panel p-6 rounded-2xl lg:sticky lg:top-8">
           <h3 className="text-lg font-bold mb-6">최고의 효율을 내는 카피 만들기</h3>
 
-          {/* 탭 */}
-          <div className="flex flex-wrap gap-2 mb-6 pb-4 border-b border-gray-800">
-            {INPUT_TABS.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setInputType(tab.key)}
-                className={`tab-btn ${inputType === tab.key ? "active" : ""}`}
-              >
-                {tab.icon} {tab.label}
-              </button>
-            ))}
-          </div>
-
-          {/* 입력 필드 */}
-          <div className="space-y-4 mb-6">
-            {["text", "both"].includes(inputType) && (
+          {/* 통합 입력 필드 */}
+          <div className="space-y-4 mb-6 relative">
+            <div className="relative">
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                className="input-field h-32 resize-y"
-                placeholder="제품의 소구점이나 초기 카피안을 적어주세요. (예: 여름용 쿨링 스틱, 피부 열감 잡아줌)"
+                className="input-field h-48 resize-none pb-14 text-base"
+                placeholder="어떤 카피를 원하시나요? 제품의 핵심 소구점이나 요청사항을 적어주세요.&#13;&#10;(예: 똥손도 1초만에 샵퀄리티 자석 네일 완성)"
               />
-            )}
-            {["image", "both"].includes(inputType) && (
-              <input
-                value={imageUrl}
-                onChange={(e) => setImageUrl(e.target.value)}
-                className="input-field"
-                placeholder="이미지 주소(URL)를 입력하세요"
-              />
-            )}
-            {inputType === "url" && (
+              
+              {/* 미디어 업로드 버튼 */}
+              <div className="absolute bottom-4 left-4 flex items-center gap-3">
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center justify-center hover:scale-110 transition-transform group"
+                  style={{ width: '28px', height: '28px' }}
+                  title="미디어 업로드"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} style={{ width: '28px', height: '28px' }} className="stroke-gray-400 group-hover:stroke-[var(--accent)] transition-colors">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+                  </svg>
+                </button>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  className="hidden" 
+                  accept="image/*,video/*"
+                  onChange={handleMediaUpload}
+                />
+                {imageUrl && (
+                  <div className="text-xs font-semibold text-green-400 bg-green-400/10 px-3 py-1.5 rounded-lg max-w-[200px] truncate border border-green-400/20 flex items-center gap-2">
+                    ✓ 첨부됨
+                    <button onClick={() => setImageUrl("")} className="text-green-500 hover:text-green-300 ml-1">✕</button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 하단 URL 입력 필드 */}
+            <div className="relative mt-2">
+              <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} className="w-5 h-5 stroke-gray-500">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
+                </svg>
+              </div>
               <input
                 value={refUrl}
                 onChange={(e) => setRefUrl(e.target.value)}
-                className="input-field"
-                placeholder="게시물 링크 URL을 입력하세요"
+                className="input-field text-sm py-4"
+                style={{ paddingLeft: '3rem' }}
+                placeholder="가져올 게시물 URL 입력 (선택)"
               />
-            )}
+            </div>
           </div>
 
           <button

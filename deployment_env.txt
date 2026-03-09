@@ -1,0 +1,13 @@
+[Render.com Deployment Environment Variables]
+
+1. DATABASE_URL
+postgresql://postgres.dmphuetkyamaggverfmm:gghyak0616%21@aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres?sslmode=require
+
+2. GEMINI_API_KEY
+AIzaSyAyxzhfrEeTyWPvedSzkynHYIjsHSFeWoU
+
+3. JWT_SECRET_KEY
+7d9f2e4b8a1c5d3f9e2b4a6c8d0e1f3a5b7d9f0e2a4c680d2f4e6b8a0c2d4f6
+
+--------------------------------------------------
+* Note: Use these values when setting up Web Service and Background Worker on Render.

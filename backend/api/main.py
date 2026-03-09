@@ -21,8 +21,9 @@ if _code_dir not in sys.path:
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-from api.routers import generation, upload, feedback, auth, billing
+from api.routers import generation, upload, feedback, auth, billing, media
 
 
 # ════════════════════════════════════════════════════════════════
@@ -98,9 +99,14 @@ async def global_exception_handler(request: Request, exc: Exception):
 # ════════════════════════════════════════════════════════════════
 app.include_router(generation.router, prefix="/api", tags=["카피 생성"])
 app.include_router(upload.router, prefix="/api/upload", tags=["데이터 업로드"])
+app.include_router(media.router, prefix="/api", tags=["미디어 업로드"])
 app.include_router(feedback.router, prefix="/api", tags=["피드백 & 버그리포트"])
 app.include_router(auth.router, prefix="/api", tags=["인증"])
 app.include_router(billing.router, prefix="/api", tags=["결제"])
+
+# 정적 파일 서빙 (업로드된 미디어 호스팅)
+os.makedirs("temp_uploads/media", exist_ok=True)
+app.mount("/media", StaticFiles(directory="temp_uploads/media"), name="media")
 
 
 # ════════════════════════════════════════════════════════════════

@@ -150,17 +150,29 @@ def build_context(
     # URL이 있으면 스크래핑하여 텍스트/이미지를 보충합니다.
     if reference_url:
         scraped = _scrape_url_content(reference_url)
-        if scraped["text"] and not original_copy:
-            original_copy = scraped["text"]
+        # URL에서 텍스트를 가져오면, 사용자가 입력한 original_copy는 추가 소구점/요청사항으로 처리
+        if scraped["text"]:
+            if original_copy:
+                original_copy = f"원본 스레드 카피: {scraped['text']}\n\n[사용자 특별 소구점 요청]: {original_copy}"
+            else:
+                original_copy = scraped["text"]
         collected_images.extend(scraped.get("images", []))
+
+    # 로컬/서버 미디어 URL 처리 (호스팅된 이미지 URL 등)
+    if collected_images:
+        for i, img in enumerate(collected_images):
+            # 상대 경로면 절대 경로로 (서버 측 처리용, 로컬호스트 주소 가정)
+            # 여기서는 편의상 그대로 넘기고, 마케팅 포커스 분석기에서 요청 시 호스트를 붙이도록 처리하거나 
+            # 외부에서 접근 가능하게 처리됨.
+            if img.startswith("/media/"):
+                collected_images[i] = f"http://localhost:8000{img}"
 
     # ── 분기 처리 ──
     has_text = bool(original_copy and original_copy.strip())
     has_images = bool(collected_images and len(collected_images) > 0)
 
     if has_images:
-        # Case B (이미지만) 또는 Case C (텍스트+이미지)
-        # marketing_focus_extractor의 Vision API를 활용
+        # 미디어가 있는 경우
         product_name = original_copy[:50] if has_text else "제품"
         product_focus = extract_marketing_focus(
             client=client,

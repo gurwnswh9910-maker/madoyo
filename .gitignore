@@ -21,3 +21,10 @@ client-next/build/
 env/
 venv/
 ENV/
+
+embeddings.pkl
+폐기/dist/asdf.exe
+폐기/build/asdf/asdf.pkg
+*.exe
+*.pkg
+

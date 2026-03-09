@@ -8,18 +8,12 @@ from dotenv import load_dotenv
 
 # .env 파일 로드 (프로젝트 루트 또는 자동화 폴더)
 # 여러 경로에서 .env를 탐색
-_this_dir = os.path.dirname(os.path.abspath(__file__))
-_code_dir = os.path.dirname(_this_dir)  # 작동중코드/
-_project_root = os.path.dirname(_code_dir)  # madoyo/
-
-for env_path in [
-    os.path.join(_project_root, ".env"),
-    os.path.join(_project_root, "자동화", ".env"),
-    os.path.join(_code_dir, ".env"),
-]:
-    if os.path.exists(env_path):
-        load_dotenv(env_path)
-        break
+_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+env_path = os.path.join(_project_root, ".env")
+if os.path.exists(env_path):
+    load_dotenv(env_path)
+else:
+    load_dotenv()
 
 # ════════════════════════════════════════════════════════════════
 # API 및 시스템 설정

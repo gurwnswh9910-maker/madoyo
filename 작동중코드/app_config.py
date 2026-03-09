@@ -1,8 +1,13 @@
 import os
 from dotenv import load_dotenv
 
-# .env 파일 로드 (API 키 등 보안 정보)
-load_dotenv()
+# .env 파일 로드 (프로젝트 루트에서 찾기)
+BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+env_path = os.path.join(BASE_PATH, '.env')
+if os.path.exists(env_path):
+    load_dotenv(env_path)
+else:
+    load_dotenv() # Fallback to local
 
 # ════════════════════════════════════════════════════════════════════════════════
 # 1. API 및 시스템 설정

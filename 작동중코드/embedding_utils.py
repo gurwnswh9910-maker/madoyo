@@ -4,20 +4,23 @@ import numpy as np
 from google import genai
 from dotenv import load_dotenv
 
-load_dotenv()
+try:
+    from app_config import GEMINI_API_KEY
+except ImportError:
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 class EmbeddingManager:
     def __init__(self, storage_path="embeddings.pkl"):
         self.storage_path = storage_path
         self.embeddings = {} # {text: vector}
-        self.api_key = os.getenv("GEMINI_API_KEY")
+        self.api_key = GEMINI_API_KEY
         self.model_id = "gemini-embedding-001"
         
         if self.api_key:
             print(f"Initializing Gemini API Client (Model: {self.model_id})...")
             self.client = genai.Client(api_key=self.api_key)
         else:
-            print("Error: GEMINI_API_KEY not found. Falling back to Mock mode.")
+            print("Error: GEMINI_API_KEY not found. (Check .env or app_config.py)")
             self.client = None
             
         self.load_storage()
@@ -93,17 +96,33 @@ class EmbeddingManager:
             return self.create_mock_embedding(text) # Final safety fallback
 
     def get_many_embeddings(self, texts):
+        import re
+        def clean_noise_text(text):
+            if not isinstance(text, str): return ""
+            text = re.sub(r'\s*\d+\s*/\s*\d+\s*$', '', text).strip()
+            noises = ['번역하기', ' See translation', ' See original', '원문 보기']
+            for n in noises:
+                text = text.replace(n, '')
+            return text.strip()
+
         results = [None] * len(texts)
         to_fetch = []
         indices = []
+        clean_to_raw = {} # Map clean text back to the original text for result assignment
 
         for i, text in enumerate(texts):
-            text = str(text).strip()
-            if text in self.embeddings:
-                results[i] = self.embeddings[text]
+            raw_text = str(text).strip()
+            clean_text = clean_noise_text(raw_text)
+            
+            if not clean_text:
+                continue
+
+            if clean_text in self.embeddings: # Check using CLEAN text
+                results[i] = self.embeddings[clean_text]
             else:
-                to_fetch.append(text)
+                to_fetch.append(clean_text) # Fetch using CLEAN text
                 indices.append(i)
+                clean_to_raw[clean_text] = raw_text
 
         if to_fetch:
             if not self.client:
