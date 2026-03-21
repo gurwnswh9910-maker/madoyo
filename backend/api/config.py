@@ -23,6 +23,19 @@ MODEL_NAME = "gemini-3-flash-preview"
 FALLBACK_MODEL_NAME = "gemini-2.5-flash"
 EMBEDDING_MODEL = "gemini-embedding-001"
 
+# Supabase 설정
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET") # 토큰 검증용 (옵션)
+
+# PayApp 설정
+PAYAPP_USERID = os.getenv("PAYAPP_USERID")
+PAYAPP_LINKKEY = os.getenv("PAYAPP_LINKKEY")
+PAYAPP_LINKVAL = os.getenv("PAYAPP_LINKVAL")
+
+# 동적으로 Celery/Redis 사용 여부를 결정 (Render 배포 환경에서는 True, 로컬에서는 False)
+USE_CELERY = os.getenv("USE_CELERY", "false").lower() == "true" or os.getenv("RENDER") == "true"
+
 # 병렬 처리 워커 수
 MAX_WORKERS = 25
 

@@ -147,16 +147,20 @@ def build_context(
     collected_images = list(image_urls) if image_urls else []
 
     # ── URL 입력 처리 ──
-    # URL이 있으면 스크래핑하여 텍스트/이미지를 보충합니다.
+    # URL이 있으면 스레드용 강력한 스크래퍼를 사용하여 텍스트/이미지를 보충합니다.
     if reference_url:
-        scraped = _scrape_url_content(reference_url)
-        # URL에서 텍스트를 가져오면, 사용자가 입력한 original_copy는 추가 소구점/요청사항으로 처리
-        if scraped["text"]:
+        from api.services.scraper_service import get_threads_full_data
+        scraped = get_threads_full_data(reference_url)
+        
+        if scraped and scraped.get("content_text"):
+            stext = scraped["content_text"]
             if original_copy:
-                original_copy = f"원본 스레드 카피: {scraped['text']}\n\n[사용자 특별 소구점 요청]: {original_copy}"
+                original_copy = f"원본 스레드 카피: {stext}\n\n[사용자 특별 소구점 요청]: {original_copy}"
             else:
-                original_copy = scraped["text"]
-        collected_images.extend(scraped.get("images", []))
+                original_copy = stext
+        
+        if scraped and scraped.get("image_urls"):
+            collected_images.extend(scraped["image_urls"])
 
     # 로컬/서버 미디어 URL 처리 (호스팅된 이미지 URL 등)
     if collected_images:

@@ -1,9 +1,9 @@
 "use client";
-import { useState } from "react";
-import { useRef } from "react";
-import { apiPost, pollTask } from "@/lib/api";
+import { useState, useRef, useEffect, Suspense } from "react";
+import { apiGet, apiPost, pollTask } from "@/lib/api";
 import { showToast } from "@/components/layout/Toast";
 import { reportBug } from "@/lib/api";
+import { useSearchParams } from "next/navigation";
 
 interface CopyResult {
   rank: number;
@@ -23,7 +23,8 @@ const LOADING_PHASES = [
   "📊 품질 검증 중...",
 ];
 
-export default function GeneratePage() {
+function GenerateContent() {
+  const searchParams = useSearchParams();
   const [text, setText] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [refUrl, setRefUrl] = useState("");
@@ -34,6 +35,47 @@ export default function GeneratePage() {
   const [publishUrl, setPublishUrl] = useState("");
   const [showPublishBanner, setShowPublishBanner] = useState(false);
   const [genId, setGenId] = useState<string | null>(null);
+
+  // ID가 있을 경우 기존 데이터 로드
+  useEffect(() => {
+    const id = searchParams.get("id");
+    if (id) {
+      setLoadingPhase(0);
+      setIsGenerating(true);
+      apiGet(`/generations/${id}`)
+        .then((data) => {
+          setGenId(data.id);
+          // 입력값 복원
+          if (data.input_config) {
+            setText(data.input_config.reference_copy || "");
+            setRefUrl(data.input_config.url || data.input_config.reference_url || "");
+            if (data.input_config.image_urls && data.input_config.image_urls.length > 0) {
+              setImageUrl(data.input_config.image_urls[0]);
+            }
+          }
+          // 결과값 복원
+          if (data.results && data.results.copies) {
+            setResults(
+              data.results.copies.map((c: any) => ({
+                ...c,
+                copy_text: c.copy_text || c.copy || c.text || "",
+                score: c.score || c.score_data?.mss_score_estimate || 0,
+                showRefine: false,
+                chatHistory: [{ role: "assistant", content: "무엇을 어떻게 수정할까요? (예: 더 재미있게 써줘)" }],
+                refineInput: "",
+                isRefining: false,
+              }))
+            );
+          }
+        })
+        .catch((err) => {
+          showToast("기록을 불러오지 못했습니다.", "error");
+        })
+        .finally(() => {
+          setIsGenerating(false);
+        });
+    }
+  }, [searchParams]);
 
   const isInputEmpty = !text.trim() && !imageUrl.trim() && !refUrl.trim();
 
@@ -476,5 +518,13 @@ function FeedbackButtons({ onFeedback }: { onFeedback: (rating: "good" | "bad", 
         </div>
       )}
     </div>
+  );
+}
+
+export default function GeneratePage() {
+  return (
+    <Suspense fallback={<div className="text-center py-20 text-gray-500">페이지 로딩 중...</div>}>
+      <GenerateContent />
+    </Suspense>
   );
 }

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { apiUpload } from "@/lib/api";
 import { showToast } from "@/components/layout/Toast";
 
@@ -26,21 +26,61 @@ export default function UploadPage() {
     if (selected) setFile(selected);
   };
 
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
+
+  // Resume polling on refresh if job info exists
+  useEffect(() => {
+    const savedJobId = localStorage.getItem("last_bulk_job_id");
+    if (savedJobId) {
+      setJobId(savedJobId);
+      startPolling(savedJobId);
+    }
+  }, []);
+
+  const startPolling = async (bulkId: string) => {
+    const { apiGet } = await import("@/lib/api");
+    const interval = setInterval(async () => {
+      try {
+        const statusResult = await apiGet(`/upload/bulk-status/${bulkId}`);
+        setTotalCount(statusResult.total_count);
+        setProgress(`${statusResult.completed_count} / ${statusResult.total_count}건 생성 완료...`);
+        
+        if (statusResult.is_finished) {
+           setProgress(`🎉 총 ${statusResult.total_count}건 생성 완료!`);
+           clearInterval(interval);
+           localStorage.removeItem("last_bulk_job_id");
+        }
+      } catch (e) {
+          console.error(e);
+      }
+    }, 4000);
+
+    // Stop after 30 mins
+    setTimeout(() => clearInterval(interval), 1000 * 60 * 30);
+  };
+
   const handleUpload = async () => {
     if (!file) return;
     setUploading(true);
-    setProgress("파일 업로드 중...");
+    setProgress("파일 임시 저장 중...");
     try {
       const formData = new FormData();
       formData.append("file", file);
+      const { apiUpload } = await import("@/lib/api");
       const result = await apiUpload("/upload/excel", formData);
-      setProgress("✅ 처리 완료!");
-      showToast(`데이터가 성공적으로 업로드되었습니다! (task: ${result.task_id || "완료"})`);
+      
+      const bulkId = result.task_id;
+      setJobId(bulkId);
+      localStorage.setItem("last_bulk_job_id", bulkId);
+      setProgress("데이터 분석 시작 중...");
+      showToast("업로드가 완료되었습니다. 카피 대량 생성 작업이 백그라운드에서 시작되었습니다.");
+      
+      startPolling(bulkId);
       setFile(null);
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : "업로드 실패";
+    } catch (error: any) {
       setProgress("");
-      showToast(`업로드 실패: ${msg}`, "error");
+      showToast(`업로드 실패: ${error.message || "알 수 없는 오류"}`, "error");
     } finally {
       setUploading(false);
     }
@@ -48,8 +88,11 @@ export default function UploadPage() {
 
   return (
     <div className="max-w-2xl mx-auto">
-      <h2 className="text-3xl font-bold mb-2">데이터 업로드</h2>
-      <p className="text-gray-400 mb-8">엑셀 파일을 업로드하면 AI 학습 데이터에 추가됩니다.</p>
+      <h2 className="text-3xl font-bold mb-2">대량 카피 자동 생성 (Excel/CSV)</h2>
+      <p className="text-gray-400 mb-8">
+        스레드 등 소셜 미디어 게시물 URL 목록이 담긴 엑셀을 업로드하세요.<br/>
+        문구와 성과를 <strong>자동으로 긁어와 학습</strong>한 뒤, 모든 URL에 대해 <strong>최적화된 카피를 대량으로 생성</strong>합니다.
+      </p>
 
       {/* 드래그 & 드롭 영역 */}
       <div
@@ -94,9 +137,18 @@ export default function UploadPage() {
       )}
 
       {/* 진행 상태 */}
-      {progress && (
-        <div className="glass-panel p-4 rounded-xl mt-4 text-center text-sm">
-          {progress}
+      {(progress || jobId) && (
+        <div className={`glass-panel p-6 rounded-xl mt-6 text-center ${jobId ? 'border border-[var(--accent)]/50 bg-[var(--accent)]/5' : ''}`}>
+          <p className="text-sm font-bold text-white mb-2">
+            {jobId && totalCount === 0 ? "⏳ 데이터 분석 중..." : progress}
+          </p>
+          {jobId && (
+            <p className="text-xs text-gray-400">
+              이 페이지를 벗어나도 백그라운드에서 계속 진행됩니다. 완성된 카피는 
+              <a href="/mypage" className="text-[var(--accent)] underline ml-1">마이페이지 내 카피 보관함</a>
+              에서 확인하세요.
+            </p>
+          )}
         </div>
       )}
     </div>

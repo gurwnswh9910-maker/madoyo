@@ -8,8 +8,10 @@ import os
 import sys
 import time
 import re
+from datetime import datetime, timedelta
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from api.auth_middleware import get_current_user
 
 # 코어 모듈 경로 추가 (작동중코드/ 디렉토리)
 _code_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -26,10 +28,13 @@ from api.schemas import (
     TaskResponse,
     TaskStatusResponse,
 )
-from api.config import GEMINI_API_KEY, MODEL_NAME, FALLBACK_MODEL_NAME, BASE_PATH
+from api.config import GEMINI_API_KEY, MODEL_NAME, FALLBACK_MODEL_NAME, BASE_PATH, USE_CELERY
 from api.services.context_builder import build_context
 
 router = APIRouter()
+
+# 로컬(윈도우) 환경용 인메모리 태스크 저장소 (Redis 우회)
+LOCAL_TASKS = {}
 
 
 # ════════════════════════════════════════════════════════════════
@@ -53,7 +58,7 @@ async def health_check():
 # ════════════════════════════════════════════════════════════════
 
 @router.post("/generate", response_model=TaskResponse)
-async def generate_copy(request: GenerateRequest):
+async def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks):
     """
     카피 생성 요청 접수 (비동기).
     
@@ -81,16 +86,58 @@ async def generate_copy(request: GenerateRequest):
                 original_copy = str(product_focus)
 
         # Step 2: 비동기 태스크 호출
-        from api.worker import optimize_copy_task
-        task = optimize_copy_task.delay(
-            original_copy=original_copy,
-            product_focus=product_focus,
-            api_key=GEMINI_API_KEY,
-            model_name=MODEL_NAME,
-            user_id=None # 현재는 단일 유저
-        )
+        if USE_CELERY:
+            from api.worker import optimize_copy_task
+            task = optimize_copy_task.delay(
+                original_copy=original_copy,
+                product_focus=product_focus,
+                api_key=GEMINI_API_KEY,
+                model_name=MODEL_NAME,
+                user_id=None # 현재는 단일 유저
+            )
+            return TaskResponse(task_id=task.id, status="PENDING")
+        else:
+            # 로컬 BackgroundTasks 사용 (Redis/Celery 우회)
+            import uuid
+            task_id = str(uuid.uuid4())
+            LOCAL_TASKS[task_id] = {"status": "PENDING", "result": None, "error": None}
+            
+            def run_local_task(t_id, copy_text, focus_text, api_key, m_name, u_id):
+                from optimize_copy_v2 import run_optimization
+                try:
+                    LOCAL_TASKS[t_id]["status"] = "PROGRESS"
+                    results = run_optimization(
+                        original_copy=copy_text,
+                        product_focus=focus_text,
+                        api_key=api_key,
+                        model_name=m_name,
+                        user_id=u_id
+                    )
+                    formatted_copies = []
+                    for i, res in enumerate(results):
+                        formatted_copies.append({
+                            "rank": i + 1,
+                            "copy_text": res.get("copy", ""),
+                            "strategy": res.get("strategy", "전략"),
+                            "score": res.get("score_data", {}).get("mss_score_estimate", 0),
+                            "reason": res.get("score_data", {}).get("reason", "")
+                        })
+                    LOCAL_TASKS[t_id] = {"status": "SUCCESS", "result": {"copies": formatted_copies}}
+                except Exception as e:
+                    import traceback
+                    print(traceback.format_exc())
+                    LOCAL_TASKS[t_id] = {"status": "FAILURE", "error": str(e)}
 
-        return TaskResponse(task_id=task.id, status="PENDING")
+            background_tasks.add_task(
+                run_local_task,
+                t_id=task_id,
+                copy_text=original_copy,
+                focus_text=product_focus,
+                api_key=GEMINI_API_KEY,
+                m_name=MODEL_NAME,
+                u_id=None
+            )
+            return TaskResponse(task_id=task_id, status="PENDING")
 
     except Exception as e:
         print(f"\n[API] ❌ 카피 생성 요청 중 오류: {e}")
@@ -102,6 +149,18 @@ async def get_task_status(task_id: str):
     """
     비동기 작업의 진행 상태 및 결과를 조회합니다 (Polling).
     """
+    if not USE_CELERY:
+        if task_id in LOCAL_TASKS:
+            task_info = LOCAL_TASKS[task_id]
+            response = {"task_id": task_id, "status": task_info["status"]}
+            if task_info["status"] == "SUCCESS":
+                response["result"] = task_info.get("result")
+            elif task_info["status"] == "FAILURE":
+                response["error"] = task_info.get("error")
+            return response
+        else:
+            return {"task_id": task_id, "status": "FAILURE", "error": "Task not found"}
+
     from api.worker import celery_app
     from celery.result import AsyncResult
     
@@ -127,12 +186,130 @@ async def get_task_status(task_id: str):
     return response
 
 
+@router.get("/generations/me")
+async def get_my_generations(current_user=Depends(get_current_user)):
+    """
+    내 카피 생성 히스토리를 반환합니다. (최대 1일 보관)
+    """
+    from api.database import SessionLocal, Generation, MABFeedback
+    from datetime import datetime, timedelta
+    
+    db = SessionLocal()
+    try:
+        # 1일 전 데이터까지만 조회 및 자신의 것만
+        yesterday = datetime.utcnow() - timedelta(days=1)
+        generations = db.query(Generation)\
+            .filter(Generation.created_at >= yesterday)\
+            .filter(Generation.user_id == current_user.id)\
+            .order_by(Generation.created_at.desc())\
+            .limit(50).all()
+            
+        result = []
+        for gen in generations:
+            # 피드백 제출 상태도 함께 반환
+            feedback = db.query(MABFeedback).filter(MABFeedback.gen_id == gen.id).first()
+            reward_status = feedback.status if feedback else None
+            
+            result.append({
+                "id": str(gen.id),
+                "bulk_job_id": gen.bulk_job_id,
+                "created_at": gen.created_at,
+                "input_config": gen.input_config,
+                "results": gen.results,
+                "status": gen.status,
+                "reward_status": reward_status
+            })
+            
+        return {"generations": result}
+    finally:
+        db.close()
+
+@router.get("/generations/{gen_id}")
+async def get_generation_detail(gen_id: str, current_user=Depends(get_current_user)):
+    """
+    특정 카피 생성 상세 정보를 조회합니다.
+    """
+    from api.database import SessionLocal, Generation, MABFeedback
+    import uuid
+    
+    db = SessionLocal()
+    try:
+        try:
+            gid = uuid.UUID(gen_id)
+        except:
+            raise HTTPException(status_code=400, detail="유효하지 않은 ID 형식입니다.")
+            
+        gen = db.query(Generation).filter(Generation.id == gid).first()
+        if not gen:
+            raise HTTPException(status_code=404, detail="해당 기록을 찾을 수 없습니다.")
+            
+        if gen.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="접근 권한이 없습니다.")
+            
+        feedback = db.query(MABFeedback).filter(MABFeedback.gen_id == gen.id).first()
+        
+        return {
+            "id": str(gen.id),
+            "created_at": gen.created_at,
+            "input_config": gen.input_config,
+            "results": gen.results,
+            "status": gen.status,
+            "reward_status": feedback.status if feedback else None
+        }
+    finally:
+        db.close()
+
+from pydantic import BaseModel
+class SubmitUrlRequest(BaseModel):
+    url: str
+
+@router.post("/generations/{gen_id}/submit-url")
+async def submit_feedback_url(gen_id: str, req: SubmitUrlRequest):
+    """
+    [Track 2] 생성된 카피를 발행한 URL을 제출하여 24시간 후 크레딧 보상 큐에 등록합니다.
+    """
+    import re
+    from api.database import SessionLocal, Generation, MABFeedback
+    
+    # 1차 검증: 스레드 URL 형태
+    if not re.match(r'^https?://(www\.)?threads\.net/.*', req.url):
+        raise HTTPException(status_code=400, detail="유효한 Threads URL이 아닙니다.")
+        
+    db = SessionLocal()
+    try:
+        # 중복 URL 제출 방지
+        existing = db.query(MABFeedback).filter(MABFeedback.published_url == req.url).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="이미 보상이 신청된 URL입니다.")
+            
+        # 큐 등록
+        feedback = db.query(MABFeedback).filter(MABFeedback.gen_id == gen_id).first()
+        
+        # 만약 피드백 레코드가 없으면 생성
+        if not feedback:
+            feedback = MABFeedback(gen_id=gen_id, status="pending")
+            db.add(feedback)
+            
+        feedback.published_url = req.url
+        feedback.status = "pending"
+        db.commit()
+        
+        # 24시간 뒤 워커 실행 (Delay) - dev 환경 테스트를 위해 15초(15)로 임시 단축 가능
+        from api.worker import update_post_performance_task
+        # update_post_performance_task.apply_async(args=[req.url, gen_id], countdown=86400) # PROD용 24시간 
+        update_post_performance_task.apply_async(args=[req.url, gen_id], countdown=30) # 테스트용 30초
+        
+        return {"status": "success", "message": "성공적으로 접수되었습니다. 24시간 후 검증을 거쳐 크레딧이 지급됩니다."}
+        
+    finally:
+        db.close()
+
 # ════════════════════════════════════════════════════════════════
 # 카피 수정 (챗봇)
 # ════════════════════════════════════════════════════════════════
 
 @router.post("/refine", response_model=RefineResponse)
-async def refine_copy(request: RefineRequest):
+async def refine_copy(request: RefineRequest, current_user=Depends(get_current_user)):
     """
     생성된 카피를 유저 요청에 맞게 미세 수정합니다.
     가벼운 단일 LLM 호출로 처리합니다.
@@ -179,8 +356,33 @@ async def refine_copy(request: RefineRequest):
             # 불필요한 마크다운/따옴표 제거
             refined = re.sub(r'^[`"\'\s]+|[`"\'\s]+$', "", refined)
             refined = re.sub(r"^```.*?\n|```$", "", refined, flags=re.MULTILINE).strip()
+            
+            # DB 저장 로직 추가
+            from api.database import SessionLocal, Generation, RefineChat
+            import uuid
+            
+            db = SessionLocal()
+            try:
+                gid = uuid.UUID(request.gen_id)
+                # 소유권 확인
+                gen = db.query(Generation).filter(Generation.id == gid).first()
+                if not gen or gen.user_id != current_user.id:
+                    raise HTTPException(status_code=403, detail="접근 권한이 없거나 존재하지 않는 작업입니다.")
+                
+                new_refine = RefineChat(
+                    gen_id=gid,
+                    user_instruction=request.user_instruction,
+                    refined_copy=refined
+                )
+                db.add(new_refine)
+                db.commit()
+            finally:
+                db.close()
+
+        except HTTPException:
+            raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"LLM 수정 실패: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"LLM 수정 또는 저장 실패: {str(e)}")
 
         return RefineResponse(refined_copy=refined)
 

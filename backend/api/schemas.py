@@ -48,6 +48,7 @@ class GenerateResponse(BaseModel):
 
 class RefineRequest(BaseModel):
     """카피 미세 수정 요청"""
+    gen_id: str  # 연결된 generation ID
     original_copy: str
     user_instruction: str
     conversation_history: Optional[list[dict]] = None

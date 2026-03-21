@@ -1,32 +1,31 @@
 """
-결제 시스템 라우터
-- 포트원(PortOne) 결제 검증
-- 크레딧 충전 Webhook
-- 요금제 조회
+결제 시스템 라우터 (페이앱 PayApp 버전)
+- 비사업자용 결제 시스템 (페이앱) 연동
+- 결제 요청 생성 및 웹훅 처리
 """
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, Form
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from api.database import SessionLocal, User
 from api.auth_middleware import get_current_user
 from api.credit_guard import add_credit
+from api.config import PAYAPP_USERID, PAYAPP_LINKKEY, PAYAPP_LINKVAL
 import hmac
 import hashlib
+import requests
 
 router = APIRouter()
-
 
 # ════════════════════════════════════════════════════════════════
 # 스키마 정의
 # ════════════════════════════════════════════════════════════════
 
 class CheckoutRequest(BaseModel):
-    plan: str  # "basic_30" | "pro_100" | "enterprise_500"
+    plan: str  # "pro_1" | "pro_3" | "pro_12" (예: 결제 개월 수)
 
 class CheckoutResponse(BaseModel):
-    payment_id: str
-    amount: int
-    credits_to_add: int
+    payment_url: str  # 페이앱 결제창 URL
+    order_id: str
 
 class PlanInfo(BaseModel):
     name: str
@@ -34,14 +33,12 @@ class PlanInfo(BaseModel):
     price: int  # KRW
     description: str
 
-
-# 요금제 정보
+# 요금제 정보 (비사업자 타겟으로 현실적인 구성)
 PLANS = {
-    "basic_30": PlanInfo(name="Basic", credits=30, price=9900, description="소규모 테스트용"),
-    "pro_100": PlanInfo(name="Pro", credits=100, price=29900, description="본격 마케팅용"),
-    "enterprise_500": PlanInfo(name="Enterprise", credits=500, price=99900, description="대량 생성용"),
+    "pro_1": PlanInfo(name="Pro 1개월", credits=50, price=29900, description="한 달간 부담 없이 사용"),
+    "pro_3": PlanInfo(name="Pro 3개월", credits=200, price=79900, description="10% 할인된 가격"),
+    "pro_12": PlanInfo(name="Pro 1년", credits=1000, price=299000, description="가장 저렴한 장기 플랜"),
 }
-
 
 # ════════════════════════════════════════════════════════════════
 # 요금제 목록
@@ -56,89 +53,123 @@ async def get_plans():
         ]
     }
 
-
 # ════════════════════════════════════════════════════════════════
-# 결제 요청 생성
+# 페이앱 결제 요청 생성
 # ════════════════════════════════════════════════════════════════
 
 @router.post("/billing/checkout", response_model=CheckoutResponse)
 async def create_checkout(req: CheckoutRequest, current_user=Depends(get_current_user)):
-    """포트원 결제를 위한 주문 정보를 생성합니다."""
+    """페이앱 결제창을 띄우기 위한 URL을 생성합니다."""
     plan = PLANS.get(req.plan)
     if not plan:
         raise HTTPException(status_code=400, detail="존재하지 않는 요금제입니다.")
     
     import uuid
-    payment_id = f"PAY-{uuid.uuid4().hex[:12].upper()}"
+    order_id = f"ORDER-{uuid.uuid4().hex[:12].upper()}"
     
-    # 결제 정보를 DB에 기록 (PaymentLog 테이블 사용)
-    # 실제로는 여기서 포트원 API를 호출하여 결제 세션을 생성합니다.
+    # 페이앱 API 호출 (결제 요청)
+    # 실제 운영 시에는 프론트엔드에서 SDK를 쓰는 것이 편하지만, 
+    # 서버 사이드에서 결제를 생성하여 URL을 받아오는 방식이 보안상 더 견고합니다.
     
-    return CheckoutResponse(
-        payment_id=payment_id,
-        amount=plan.price,
-        credits_to_add=plan.credits,
-    )
-
+    payapp_api_url = "https://api.payapp.kr/oapi/api/payment.html"
+    
+    payload = {
+        "cmd": "payrequest",
+        "userid": PAYAPP_USERID,
+        "linkkey": PAYAPP_LINKKEY,
+        "goodname": f"마도요 {plan.name}",
+        "price": str(plan.price),
+        "recvphone": "01000000000", # 실제 사용자 번호가 있으면 좋으나 필수는 아님
+        "memo": f"User: {current_user.email}, Plan: {req.plan}",
+        "reqmode": "api",
+        "var1": str(current_user.id), # 사용자 ID 전달 (웹훅에서 사용)
+        "var2": req.plan,            # 플랜 정보 전달
+        "feedbackurl": "https://api.snapthread.site/api/billing/webhook", # 웹훅 수신 주소
+        "vccode": "KR",
+        "currency": "KRW"
+    }
+    
+    try:
+        response = requests.post(payapp_api_url, data=payload)
+        res_data = response.text
+        # 페이앱 응답은 key=value&... 형태의 쿼리 스트링일 수 있음
+        import urllib.parse
+        parsed_res = dict(urllib.parse.parse_qsl(res_data))
+        
+        if parsed_res.get("state") != "1":
+            error_msg = parsed_res.get("errorMessage", "알 수 없는 오류")
+            raise HTTPException(status_code=500, detail=f"페이앱 결제 요청 실패: {error_msg}")
+        
+        return CheckoutResponse(
+            payment_url=parsed_res.get("mul_no"), # 결제 페이지 URL
+            order_id=order_id
+        )
+    except Exception as e:
+        print(f"PayApp Error: {e}")
+        raise HTTPException(status_code=500, detail="결제 서버 통신 중 오류가 발생했습니다.")
 
 # ════════════════════════════════════════════════════════════════
-# 결제 승인 Webhook (포트원에서 호출)
+# 페이앱 결제 승인 Webhook (Feedback URL)
 # ════════════════════════════════════════════════════════════════
 
 @router.post("/billing/webhook")
-async def payment_webhook(request: Request):
+async def payapp_webhook(
+    userid: str = Form(...),
+    linkkey: str = Form(...),
+    state: str = Form(...),
+    mul_no: str = Form(...),
+    price: str = Form(...),
+    var1: str = Form(None), # User ID
+    var2: str = Form(None), # Plan ID
+    # 기타 페이앱 제공 파라미터들
+):
     """
-    포트원 결제 승인 Webhook.
-    결제 성공 시 해당 사용자의 크레딧을 충전합니다.
+    페이앱 결제 완료 시 호출되는 웹훅.
+    결제 상태가 완료(state=4)인 경우 사용자의 크레딧을 업데이트합니다.
     """
-    try:
-        body = await request.json()
-        
-        # 포트원 Webhook 기본 구조
-        payment_id = body.get("payment_id") or body.get("imp_uid")
-        merchant_uid = body.get("merchant_uid")
-        status = body.get("status")
-        
-        if status != "paid":
-            return {"status": "ignored", "reason": f"status={status}"}
-        
-        # TODO: 포트원 API로 결제 검증 (imp_uid 조회)
-        # 실제 구현 시 여기서 포트원 서버에 결제 상태를 재확인합니다.
-        
-        # merchant_uid에서 user_id와 plan을 파싱
-        # 예) merchant_uid = "USER-{user_id}-PLAN-{plan_id}"
-        # 현재는 body에서 직접 받는 방식으로 처리
-        user_id = body.get("user_id")
-        plan_id = body.get("plan_id")
-        
-        if not user_id or not plan_id:
-            return {"status": "error", "detail": "user_id, plan_id 필수"}
-        
-        plan = PLANS.get(plan_id)
-        if not plan:
-            return {"status": "error", "detail": "유효하지 않은 요금제"}
-        
-        # 크레딧 충전
-        new_balance = add_credit(user_id, plan.credits)
-        
-        return {
-            "status": "ok",
-            "credits_added": plan.credits,
-            "new_balance": new_balance,
-        }
-    except Exception as e:
-        return {"status": "error", "detail": str(e)}
+    # 1. 시크릿 키 검증 (보안)
+    if linkkey != PAYAPP_LINKKEY:
+         return {"status": "error", "message": "invalid linkkey"}
 
+    # 2. 결제 성공 여부 확인 (state 4는 결제완료)
+    if state != "4":
+        return {"status": "ignored", "state": state}
+
+    user_id = var1
+    plan_id = var2
+
+    if not user_id or not plan_id:
+        return {"status": "error", "message": "missing user_id or plan_id"}
+
+    plan = PLANS.get(plan_id)
+    if not plan:
+        return {"status": "error", "message": "invalid plan"}
+
+    # 3. DB 업데이트
+    new_balance = add_credit(user_id, plan.credits)
+    
+    # 4. 플랜 업데이트
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            user.plan = "pro"
+            db.commit()
+    finally:
+        db.close()
+
+    return "SUCCESS" # 페이앱은 성공 시 SUCCESS 문자열을 요구하기도 함
 
 # ════════════════════════════════════════════════════════════════
-# 내 결제 내역
+# 내 결제 정보 조회
 # ════════════════════════════════════════════════════════════════
 
 @router.get("/billing/my-credits")
 async def get_my_credits(current_user=Depends(get_current_user)):
-    """현재 사용자의 크레딧 잔액을 반환합니다."""
+    """현재 사용자의 크레딧 잔액과 플랜 정보를 반환합니다."""
     return {
         "user_id": str(current_user.id),
+        "email": current_user.email,
         "credits": current_user.credits,
         "plan": current_user.plan,
     }
