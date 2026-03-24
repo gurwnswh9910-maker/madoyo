@@ -1,43 +1,68 @@
 "use client";
 import Link from "next/link";
+import Image from "next/image";
 
 export default function LandingPage() {
   return (
-    <div className="flex flex-col items-center justify-center py-12 md:py-24 text-center">
-      <div className="px-4 py-1 rounded-full text-sm font-bold mb-6 border border-[var(--accent)] text-[var(--accent)] bg-[var(--accent)]/10">
-        MAB 전략 최적화 AI
-      </div>
+    <div className="flex flex-col gap-16 md:gap-24 py-12 md:py-20">
+      {/* 히어로 섹션 */}
+      <section className="flex flex-col md:flex-row items-center gap-10 md:gap-16 text-center md:text-left">
+        {/* 모바일에서는 이미지를 먼저 보여주어 시각적 임팩트 부여 (order-first) */}
+        <div className="flex-1 w-full max-w-lg md:max-w-xl relative animate-float order-first md:order-last">
+          <div className="absolute inset-0 bg-gradient-to-tr from-[#6c5ce7]/20 to-[#a29bfe]/20 blur-3xl -z-10 rounded-full"></div>
+          <Image 
+            src="/images/hero_img.png" 
+            alt="SnapThread AI Dashboard Mockup" 
+            width={700}
+            height={400}
+            className="rounded-2xl shadow-2xl border border-white/10 glass-panel w-full h-auto"
+            priority
+          />
+        </div>
 
-      <h2 className="text-4xl md:text-6xl font-extrabold mb-6 leading-tight">
-        터지는 SNS 게시물,<br />
-        <span className="bg-gradient-to-r from-[#6c5ce7] to-[#a29bfe] bg-clip-text text-transparent">
-          15초 만에 완성하세요
-        </span>
-      </h2>
+        <div className="flex-1 space-y-6">
+          <div className="inline-block px-4 py-1.5 rounded-full text-xs font-bold border border-[var(--accent)] text-[var(--accent)] bg-[var(--accent)]/10 animate-fade-in shadow-[0_0_15px_rgba(108,92,231,0.2)]">
+            SnapThread — 데이터가 증명하는 성과
+          </div>
 
-      <p className="text-xl text-gray-400 mb-10 max-w-2xl">
-        수천 개의 성공적인 게시물을 학습한 AI가 당신의 제품에 가장 알맞은 소구점과 전략을 찾아 카피를 작성해 드립니다.
-      </p>
+          <h1 className="text-3xl md:text-5xl lg:text-6xl font-extrabold leading-[1.25] tracking-tight whitespace-pre-line">
+            이제 감(Feel)으로 쓰는<br className="md:hidden" />
+            <span className="bg-gradient-to-r from-[#6c5ce7] to-[#a29bfe] bg-clip-text text-transparent">시대는 끝났습니다.</span>
+          </h1>
 
-      <Link
-        href="/generate"
-        className="btn-primary px-8 py-4 rounded-xl text-lg flex items-center gap-2"
-        style={{ boxShadow: "0 0 20px var(--accent-glow)" }}
-      >
-        ⚡ 지금 바로 시작하기
-      </Link>
+          <h2 className="text-lg md:text-2xl text-gray-200 font-medium leading-relaxed max-w-2xl mx-auto md:mx-0">
+            검증된 데이터와 AI 스코어링이 완성하는 <br className="hidden md:block" />
+            가장 확실한 1등 카피, SnapThread
+          </h2>
 
-      {/* 기능 소개 카드 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-20 w-full max-w-4xl">
+          <p className="text-base md:text-lg text-gray-400 max-w-xl leading-relaxed mx-auto md:mx-0">
+            상품 이미지나 URL 한 줄만 던져주세요. 수만 개의 떡상 데이터를 학습한 AI가 
+            제품의 핵심 소구점을 분석하여 터지는 전략을 제안합니다.
+          </p>
+
+          <div className="flex flex-col sm:flex-row gap-4 pt-4 justify-center md:justify-start">
+            <Link
+              href="/generate"
+              className="btn-primary px-10 py-4 rounded-xl text-lg font-bold flex items-center justify-center gap-2 hover:scale-105 transition-all duration-300 active:scale-95"
+              style={{ boxShadow: "0 10px 40px var(--accent-glow)" }}
+            >
+              ⚡ 카피 생성하기
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* 기능 소개 섹션 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-12">
         {[
-          { icon: "🎯", title: "MAB 전략 최적화", desc: "수천 개의 실제 성과 데이터를 학습한 AI가 최적의 전략을 자동 선택합니다." },
-          { icon: "📊", title: "실시간 품질 채점", desc: "생성된 카피를 즉시 채점하여 가장 높은 점수의 카피만 제공합니다." },
-          { icon: "🔄", title: "자동 학습 루프", desc: "실제 게시물 성과 데이터가 다시 AI에 반영되어 지속적으로 품질이 향상됩니다." },
+          { icon: "🎯", title: "지능형 전략 기반", desc: "단순한 생성지가 아닙니다. 빅데이터로 입증된 '수익형' 전략을 먼저 수립합니다." },
+          { icon: "📊", title: "정밀 랭킹 채점", desc: "파인튜닝된 AI가 100여 개의 후보군 중 가장 터질 확률이 높은 1등만 가려냅니다." },
+          { icon: "⚡", title: "URL 한 줄의 마법", desc: "URL에서 이미지와 텍스트를 자동 추출하여 즉시 수익화 파이프라인으로 연결합니다." },
         ].map((card) => (
-          <div key={card.title} className="glass-panel p-6 rounded-2xl text-left">
-            <div className="text-3xl mb-3">{card.icon}</div>
-            <h3 className="text-lg font-bold mb-2">{card.title}</h3>
-            <p className="text-gray-400 text-sm">{card.desc}</p>
+          <div key={card.title} className="glass-panel p-8 rounded-3xl border border-white/5 hover:border-[var(--accent)]/30 transition-all group">
+            <div className="text-4xl mb-4 group-hover:scale-110 transition-transform">{card.icon}</div>
+            <h3 className="text-xl font-bold mb-3">{card.title}</h3>
+            <p className="text-gray-400 leading-relaxed text-sm">{card.desc}</p>
           </div>
         ))}
       </div>

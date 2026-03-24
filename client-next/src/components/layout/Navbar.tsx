@@ -6,17 +6,17 @@ export default function Navbar() {
   const { user, logout } = useAuth();
 
   return (
-    <header className="flex justify-between items-center pb-6 border-b border-gray-800 mb-8">
-      <Link href="/" className="flex items-center gap-2 cursor-pointer">
-        <span className="text-2xl">✨</span>
-        <h1 className="text-xl font-bold">CopyGen SaaS</h1>
+    <header className="flex flex-col sm:flex-row justify-between items-center pb-6 border-b border-gray-800 mb-8 gap-4">
+      <Link href="/" className="flex items-center gap-2 cursor-pointer group">
+        <span className="text-2xl group-hover:scale-110 transition-transform">⚡</span>
+        <h1 className="text-xl font-bold tracking-tight">SnapThread</h1>
       </Link>
 
-      <nav className="flex items-center gap-6">
-        <Link href="/generate" className="text-gray-400 hover:text-white transition-colors flex items-center gap-2">
+      <nav className="flex items-center gap-4 md:gap-8 overflow-x-auto w-full sm:w-auto justify-center sm:justify-end py-2 sm:py-0">
+        <Link href="/generate" className="text-gray-400 hover:text-white transition-colors flex items-center gap-1.5 whitespace-nowrap text-sm md:text-base">
           📝 카피 생성
         </Link>
-        <Link href="/upload" className="text-gray-400 hover:text-white transition-colors flex items-center gap-2">
+        <Link href="/upload" className="text-gray-400 hover:text-white transition-colors flex items-center gap-1.5 whitespace-nowrap text-sm md:text-base">
           📤 업로드
         </Link>
 

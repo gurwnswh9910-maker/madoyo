@@ -26,6 +26,8 @@ from fastapi.staticfiles import StaticFiles
 from api.routers import generation, upload, feedback, auth, billing, media
 
 
+from api.config import CORS_ALLOWED_ORIGINS
+
 # ════════════════════════════════════════════════════════════════
 # FastAPI 앱 생성
 # ════════════════════════════════════════════════════════════════
@@ -46,14 +48,7 @@ app = FastAPI(
 # ════════════════════════════════════════════════════════════════
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3005",
-        "http://127.0.0.1:3005",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-    ],
+    allow_origins=CORS_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

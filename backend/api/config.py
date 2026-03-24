@@ -33,8 +33,18 @@ PAYAPP_USERID = os.getenv("PAYAPP_USERID")
 PAYAPP_LINKKEY = os.getenv("PAYAPP_LINKKEY")
 PAYAPP_LINKVAL = os.getenv("PAYAPP_LINKVAL")
 
-# 동적으로 Celery/Redis 사용 여부를 결정 (Render 배포 환경에서는 True, 로컬에서는 False)
-USE_CELERY = os.getenv("USE_CELERY", "false").lower() == "true" or os.getenv("RENDER") == "true"
+# 실 서버 배포 시 프론트엔드 도메인을 쉼표로 나열 (예: "https://madoyo.com,https://client.onrender.com")
+_cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
+CORS_ALLOWED_ORIGINS = [origin.strip() for origin in _cors_origins.split(",") if origin.strip()]
+if not CORS_ALLOWED_ORIGINS:
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3005",
+        "http://127.0.0.1:3005",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
 
 # 병렬 처리 워커 수
 MAX_WORKERS = 25

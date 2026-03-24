@@ -5,7 +5,7 @@ import Navbar from "@/components/layout/Navbar";
 import Toast from "@/components/layout/Toast";
 
 export const metadata: Metadata = {
-  title: "CopyGen SaaS — AI 카피 생성기",
+  title: "SnapThread — AI 카피 생성기",
   description: "MAB 전략 최적화 + 임베딩 기반 스코어링을 활용한 고성과 SNS 카피 생성 서비스",
 };
 
