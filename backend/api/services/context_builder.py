@@ -134,6 +134,7 @@ def build_context(
     reference_copy: str = None,
     image_urls: list = None,
     reference_url: str = None,
+    appeal_point: str = None,
 ) -> tuple:
     """
     3가지 입력 타입을 표준화된 product_focus(dict)와 original_copy(str)로 변환합니다.
@@ -158,6 +159,9 @@ def build_context(
                 original_copy = f"원본 스레드 카피: {stext}\n\n[사용자 특별 소구점 요청]: {original_copy}"
             else:
                 original_copy = stext
+        
+        if appeal_point:
+            original_copy = f"[중요 소구점]: {appeal_point}\n\n{original_copy}"
         
         if scraped and scraped.get("image_urls"):
             collected_images.extend(scraped["image_urls"])

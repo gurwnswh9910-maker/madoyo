@@ -25,9 +25,10 @@ const LOADING_PHASES = [
 
 function GenerateContent() {
   const searchParams = useSearchParams();
-  const [text, setText] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [refUrl, setRefUrl] = useState("");
+    const [text, setText] = useState("");
+    const [appealPoint, setAppealPoint] = useState("");
+    const [imageUrl, setImageUrl] = useState("");
+    const [refUrl, setRefUrl] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [results, setResults] = useState<CopyResult[]>([]);
@@ -99,6 +100,7 @@ function GenerateContent() {
     try {
       const reqBody = {
         reference_copy: text.trim() ? text : null,
+        appeal_point: appealPoint.trim() ? appealPoint : null,
         image_urls: imageUrl ? [imageUrl] : null,
         reference_url: refUrl.trim() ? refUrl : null,
       };
@@ -305,6 +307,19 @@ function GenerateContent() {
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* 소구점 입력 필드 (복원됨) */}
+            <div className="relative mt-2">
+              <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none">
+                <span className="text-lg">🎯</span>
+              </div>
+              <input
+                value={appealPoint}
+                onChange={(e) => setAppealPoint(e.target.value)}
+                className="input-field text-sm py-4 pl-12"
+                placeholder="핵심 소구점 (예: 쿨링 효과, 1초 완성)"
+              />
             </div>
 
             {/* 하단 URL 입력 필드 */}

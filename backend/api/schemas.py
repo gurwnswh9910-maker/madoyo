@@ -14,15 +14,17 @@ class GenerateRequest(BaseModel):
     """카피 생성 요청. 최소 1개 입력이 필요합니다."""
     reference_copy: Optional[str] = None        # 참고 카피 텍스트
     image_urls: Optional[list[str]] = None       # 이미지 URL 목록
-    reference_url: Optional[str] = None          # 레퍼런스 게시물 URL
+    reference_url: Optional[list[str]] = None    # 레퍼런스 주소 목록 (배열)
+    appeal_point: Optional[str] = None           # 핵심 소구점 (추가됨)
 
     @model_validator(mode="after")
     def check_at_least_one_input(self):
         has_copy = bool(self.reference_copy and self.reference_copy.strip())
         has_images = bool(self.image_urls and len(self.image_urls) > 0)
-        has_url = bool(self.reference_url and self.reference_url.strip())
-        if not (has_copy or has_images or has_url):
-            raise ValueError("최소 1개의 입력(참고 카피, 이미지, 또는 URL)이 필요합니다.")
+        has_url = bool(self.reference_url and (len(self.reference_url) > 0 if isinstance(self.reference_url, list) else self.reference_url.strip()))
+        has_appeal = bool(self.appeal_point and self.appeal_point.strip())
+        if not (has_copy or has_images or has_url or has_appeal):
+            raise ValueError("최소 1개의 입력(참고 카피, 이미지, URL, 또는 소구점)이 필요합니다.")
         return self
 
 

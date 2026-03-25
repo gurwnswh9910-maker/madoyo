@@ -76,6 +76,7 @@ async def generate_copy(request: GenerateRequest, background_tasks: BackgroundTa
             reference_copy=request.reference_copy,
             image_urls=request.image_urls,
             reference_url=request.reference_url,
+            appeal_point=request.appeal_point,
         )
 
         # original_copy 보정
