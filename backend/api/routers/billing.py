@@ -9,7 +9,7 @@ from typing import Optional, List
 from api.database import SessionLocal, User
 from api.auth_middleware import get_current_user
 from api.credit_guard import add_credit
-from api.config import PAYAPP_USERID, PAYAPP_LINKKEY, PAYAPP_LINKVAL
+from api.config import PAYAPP_USERID, PAYAPP_LINKKEY, PAYAPP_LINKVAL, PAYAPP_WEBHOOK_URL
 import hmac
 import hashlib
 import requests
@@ -84,7 +84,7 @@ async def create_checkout(req: CheckoutRequest, current_user=Depends(get_current
         "reqmode": "api",
         "var1": str(current_user.id), # 사용자 ID 전달 (웹훅에서 사용)
         "var2": req.plan,            # 플랜 정보 전달
-        "feedbackurl": "https://api.snapthread.site/api/billing/webhook", # 웹훅 수신 주소
+        "feedbackurl": PAYAPP_WEBHOOK_URL,  # .env 또는 config 기반 웹훅 수신 주소
         "vccode": "KR",
         "currency": "KRW"
     }

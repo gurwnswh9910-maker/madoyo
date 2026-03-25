@@ -4,6 +4,7 @@ gunicorn
 pydantic
 sqlalchemy
 psycopg2-binary
+pgvector
 python-dotenv
 celery
 redis

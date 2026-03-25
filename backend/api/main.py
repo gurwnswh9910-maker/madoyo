@@ -72,21 +72,23 @@ async def global_exception_handler(request: Request, exc: Exception):
         except Exception:
             pass
         
-        report = BugReport(
-            layer="backend",
-            error_type=type(exc).__name__,
-            message=str(exc),
-            traceback=traceback.format_exc(),
-            context={
-                "method": request.method,
-                "url": str(request.url),
-                "body": body,
-            },
-            code_ref=f"{type(exc).__module__}",
-        )
-        db.add(report)
-        db.commit()
-        db.close()
+        try:
+            report = BugReport(
+                layer="backend",
+                error_type=type(exc).__name__,
+                message=str(exc),
+                traceback=traceback.format_exc(),
+                context={
+                    "method": request.method,
+                    "url": str(request.url),
+                    "body": body,
+                },
+                code_ref=f"{type(exc).__module__}",
+            )
+            db.add(report)
+            db.commit()
+        finally:
+            db.close()
     except Exception as db_err:
         print(f"⚠️ 버그리포트 DB 저장 실패: {db_err}")
     

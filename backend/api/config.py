@@ -38,6 +38,9 @@ _cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
 CORS_ALLOWED_ORIGINS = [origin.strip() for origin in _cors_origins.split(",") if origin.strip()]
 if not CORS_ALLOWED_ORIGINS:
     CORS_ALLOWED_ORIGINS = [
+        "https://snapthread.site",
+        "https://www.snapthread.site",
+        "https://madoyo.vercel.app",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:3005",
@@ -45,6 +48,21 @@ if not CORS_ALLOWED_ORIGINS:
         "http://localhost:8000",
         "http://127.0.0.1:8000",
     ]
+
+# Celery 사용 여부 (Windows 로컬: false, Render/Linux 서버: true)
+USE_CELERY = os.getenv("USE_CELERY", "false").lower() == "true"
+
+# 미디어 서빙 베이스 URL (로컬: localhost, 프로덕션: 실제 도메인)
+MEDIA_BASE_URL = os.getenv("MEDIA_BASE_URL", "http://localhost:8000")
+
+# PayApp 웹훅 수신 URL
+PAYAPP_WEBHOOK_URL = os.getenv("PAYAPP_WEBHOOK_URL", "https://api.snapthread.site/api/billing/webhook")
+
+# 보상 검증 대기 시간 (초) — 프로덕션: 86400 (24시간), 테스트: 30
+REWARD_COUNTDOWN_SEC = int(os.getenv("REWARD_COUNTDOWN_SEC", "86400"))
+
+# 미디어 업로드 최대 크기 (MB)
+MEDIA_MAX_SIZE_MB = int(os.getenv("MEDIA_MAX_SIZE_MB", "10"))
 
 # 병렬 처리 워커 수
 MAX_WORKERS = 25

@@ -169,7 +169,8 @@ def build_context(
             # 여기서는 편의상 그대로 넘기고, 마케팅 포커스 분석기에서 요청 시 호스트를 붙이도록 처리하거나 
             # 외부에서 접근 가능하게 처리됨.
             if img.startswith("/media/"):
-                collected_images[i] = f"http://localhost:8000{img}"
+                from api.config import MEDIA_BASE_URL
+                collected_images[i] = f"{MEDIA_BASE_URL}{img}"
 
     # ── 분기 처리 ──
     has_text = bool(original_copy and original_copy.strip())

@@ -315,8 +315,7 @@ def update_post_performance_task(self, url, feedback_id):
         feedback.status = "completed"
         feedback.reward_credits = 2  # 보상 2 크레딧
         
-        # 유저 크레딧 충전
-        generation = feedback.generation # SQLAlchemy relationship needed or join, let's look up user
+        # 유저 크레딧 충전 (직접 쿼리로 유저 확인)
         from api.database import Generation
         gen = db.query(Generation).filter(Generation.id == feedback_id).first()
         if gen and gen.user_id:

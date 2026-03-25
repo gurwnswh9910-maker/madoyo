@@ -19,12 +19,12 @@ class FeedbackRequest(BaseModel):
     gen_id: str
     copy_rank: int = 1
     rating: str  # "good" | "bad"
-    reasons: Optional[list[str]] = []
+    reasons: Optional[list[str]] = None
 
 class FrontendBugReport(BaseModel):
     error_type: str
     message: str
-    context: Optional[dict] = {}
+    context: Optional[dict] = None
 
 
 # ════════════════════════════════════════════════════════════════

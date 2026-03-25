@@ -28,7 +28,7 @@ from api.schemas import (
     TaskResponse,
     TaskStatusResponse,
 )
-from api.config import GEMINI_API_KEY, MODEL_NAME, FALLBACK_MODEL_NAME, BASE_PATH, USE_CELERY
+from api.config import GEMINI_API_KEY, MODEL_NAME, FALLBACK_MODEL_NAME, BASE_PATH, USE_CELERY, REWARD_COUNTDOWN_SEC
 from api.services.context_builder import build_context
 
 router = APIRouter()
@@ -294,10 +294,9 @@ async def submit_feedback_url(gen_id: str, req: SubmitUrlRequest):
         feedback.status = "pending"
         db.commit()
         
-        # 24시간 뒤 워커 실행 (Delay) - dev 환경 테스트를 위해 15초(15)로 임시 단축 가능
+        # 보상 검증 대기 시간 (.env REWARD_COUNTDOWN_SEC: 프로덕션 86400, 테스트 30)
         from api.worker import update_post_performance_task
-        # update_post_performance_task.apply_async(args=[req.url, gen_id], countdown=86400) # PROD용 24시간 
-        update_post_performance_task.apply_async(args=[req.url, gen_id], countdown=30) # 테스트용 30초
+        update_post_performance_task.apply_async(args=[req.url, gen_id], countdown=REWARD_COUNTDOWN_SEC)
         
         return {"status": "success", "message": "성공적으로 접수되었습니다. 24시간 후 검증을 거쳐 크레딧이 지급됩니다."}
         

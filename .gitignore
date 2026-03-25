@@ -6,6 +6,7 @@
 !/backend/**
 !/client-next/
 !/client-next/**
+!/render.yaml
 !/.gitignore
 
 # 단, 허용된 폴더 안에서도 민감한 파일/임시 파일은 무시

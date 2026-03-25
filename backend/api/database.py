@@ -40,15 +40,15 @@ class MABEmbedding(Base):
     content_text = Column(Text, nullable=False)
     embedding = Column(Vector(3072)) 
     mss_score = Column(Float, default=0.0)
-    metadata_json = Column(JSONB, default={})
+    metadata_json = Column(JSONB, default=dict)
 
 class Generation(Base):
     __tablename__ = "generations"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     bulk_job_id = Column(String(50), nullable=True, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    input_config = Column(JSONB, default={})
-    results = Column(JSONB, default={})
+    input_config = Column(JSONB, default=dict)
+    results = Column(JSONB, default=dict)
     status = Column(String, default="processing")
     created_at = Column(TIMESTAMP, server_default=func.now())
 
@@ -57,11 +57,11 @@ class MABFeedback(Base):
     gen_id = Column(UUID(as_uuid=True), ForeignKey("generations.id"), primary_key=True)
     is_copied = Column(Boolean, default=False)
     user_rating = Column(String, nullable=True)     # "good" | "bad" | null
-    rating_reasons = Column(JSONB, default=[])       # ["어색한 표현", "주제 무관"]
+    rating_reasons = Column(JSONB, default=list)       # ["어색한 표현", "주제 무관"]
     published_url = Column(Text, nullable=True, unique=True)
     status = Column(String(20), default="pending")  # pending, completed, rejected
     reward_credits = Column(Integer, default=0)
-    performance = Column(JSONB, default={})
+    performance = Column(JSONB, default=dict)
 
 class BugReport(Base):
     __tablename__ = "bug_reports"
@@ -70,7 +70,7 @@ class BugReport(Base):
     error_type = Column(String(100))
     message = Column(Text)
     traceback = Column(Text, nullable=True)
-    context = Column(JSONB, default={})
+    context = Column(JSONB, default=dict)
     code_ref = Column(String(200), nullable=True)
     status = Column(String(20), default="open")
     created_at = Column(TIMESTAMP, server_default=func.now())

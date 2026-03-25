@@ -2,11 +2,14 @@ import os
 import shutil
 import uuid
 from fastapi import APIRouter, UploadFile, File, HTTPException
+from api.config import MEDIA_MAX_SIZE_MB
 
 router = APIRouter()
 
 UPLOAD_DIR = "temp_uploads/media"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+MAX_FILE_SIZE = MEDIA_MAX_SIZE_MB * 1024 * 1024  # bytes
 
 @router.post("/media", response_model=dict)
 async def upload_media(file: UploadFile = File(...)):
@@ -22,6 +25,14 @@ async def upload_media(file: UploadFile = File(...)):
     
     if ext not in allowed_exts:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 파일 형식입니다: {ext}")
+
+    # 파일 크기 검증
+    contents = await file.read()
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"파일 크기가 {MEDIA_MAX_SIZE_MB}MB를 초과합니다. ({len(contents) // (1024*1024)}MB)"
+        )
         
     file_id = str(uuid.uuid4())
     filename = f"{file_id}{ext}"
@@ -29,7 +40,7 @@ async def upload_media(file: UploadFile = File(...)):
     
     try:
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            buffer.write(contents)
             
         # 서버에서 서빙되는 URL 경로 반환 (예: http://localhost:8000/media/...)
         url = f"/media/{filename}"

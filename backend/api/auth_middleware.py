@@ -16,8 +16,12 @@ from jwt import PyJWKClient
 # JWT 검증 설정 (Supabase는 HS256 사용)
 SUPABASE_ALGORITHM = "HS256"
 
-# 비밀 키 (.env에서 가져오거나 기본값 사용)
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "madoyo-secret-key-change-in-production")
+# 비밀 키 (.env에서 반드시 설정 필요)
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    import warnings
+    warnings.warn("⚠️ JWT_SECRET_KEY 미설정! .env에 반드시 설정하세요. 임시 랜덤 키를 사용합니다.")
+    SECRET_KEY = "dev-only-insecure-" + os.urandom(16).hex()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 

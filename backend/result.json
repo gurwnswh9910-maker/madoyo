@@ -1,0 +1,31 @@
+{
+  "task_id": "bb555b95-9b05-410e-8237-6b221566ff74",
+  "status": "SUCCESS",
+  "result": {
+    "copies": [
+      {
+        "rank": 1,
+        "copy_text": "카리나 윈터 핏 보고 명품인 줄 알았는데;;\n언니가 이거 어디 백화점 거냐고 꼬치꼬치 캐물음ㅋㅋ\n10,000원이라니까 구라 치지 말라고 눈 뒤집어짐\n진심 갓성비 미친놈이라 정보 따일 준비 해야 함💥",
+        "strategy": "[동적B] 초밀착 일상 검증형 (Hyper-Realistic Context)",
+        "score": 0,
+        "reason": ""
+      },
+      {
+        "rank": 2,
+        "copy_text": "카리나 윈터 핏 예뻐서 샀는데 진짜 화나네;;\n진작 알았으면 작년 소개팅 때 입었어야 했음ㅠ\n10,000원짜리가 명품 아우라 씹어먹는 거 실화?\n언니도 어디서 샀냐고 난리 난 갓성비 미친놈임💥\n품절 뜨기 전에 깔별로 쟁여야 됨 진심;;",
+        "strategy": "[동적A] 과격한 후회 및 소환형 (Aggressive Call-out)",
+        "score": 0,
+        "reason": ""
+      },
+      {
+        "rank": 3,
+        "copy_text": "카리나 윈터 핏 보고 샀다가 진심 화가 치밀어 오름;;\n이걸 왜 이제야 알았지? 3년 전부터 입었어야 함 ㅠㅠ\n만원이라니까 언니가 어디서 샀냐고 계속 괴롭힘ㅋㅋ\n진짜 갓성비 미친놈임... 나만 알고 싶으니까 묻지 마 💖",
+        "strategy": "[동적A] 과격한 후회 및 소환형 (Aggressive Call-out)",
+        "score": 0,
+        "reason": ""
+      }
+    ]
+  },
+  "error": null,
+  "processing_time": null
+}
