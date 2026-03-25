@@ -26,7 +26,7 @@ export default function LandingPage() {
           </div>
 
           <h1 className="text-3xl md:text-5xl lg:text-6xl font-extrabold leading-[1.25] tracking-tight whitespace-pre-line">
-            이제 감(Feel)으로 쓰는<br className="md:hidden" />
+            이제 감(Feel)으로 쓰는<br />
             <span className="bg-gradient-to-r from-[#6c5ce7] to-[#a29bfe] bg-clip-text text-transparent">시대는 끝났습니다.</span>
           </h1>
 
