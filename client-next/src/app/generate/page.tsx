@@ -278,7 +278,7 @@ function GenerateContent() {
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 className="input-field h-48 resize-none pb-14 text-base"
-                placeholder="어떤 카피를 원하시나요? 제품의 핵심 소구점이나 요청사항을 적어주세요.&#13;&#10;(예: 똥손도 1초만에 샵퀄리티 자석 네일 완성)"
+                placeholder="참고할만한 카피가 있다면 적어주세요.&#13;&#10;(예: 똥손도 1초만에 샵퀄리티 자석 네일 완성)"
               />
               
               {/* 미디어 업로드 버튼 */}
@@ -318,7 +318,7 @@ function GenerateContent() {
                 value={appealPoint}
                 onChange={(e) => setAppealPoint(e.target.value)}
                 className="input-field text-sm py-4 pl-12"
-                placeholder="핵심 소구점 (예: 쿨링 효과, 1초 완성)"
+                placeholder="제품명/핵심 소구점 (예: 99.9% 항균 쿨링 미스트)"
               />
             </div>
 
