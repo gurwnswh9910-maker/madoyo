@@ -25,9 +25,12 @@ export default function LandingPage() {
             SnapThread — 데이터가 증명하는 성과
           </div>
 
-          <h1 className="text-3xl md:text-5xl lg:text-6xl font-extrabold leading-[1.25] tracking-tight whitespace-pre-line">
-            이제 감(Feel)으로 쓰는<br />
-            <span className="bg-gradient-to-r from-[#6c5ce7] to-[#a29bfe] bg-clip-text text-transparent">시대는 끝났습니다.</span>
+          <h1 
+            className="font-extrabold leading-[1.2] tracking-tight whitespace-pre-line break-keep"
+            style={{ fontSize: "clamp(1.75rem, 8vw, 4rem)" }}
+          >
+            <span className="inline-block whitespace-nowrap">이제 감(Feel)으로 쓰는</span><br />
+            <span className="bg-gradient-to-r from-[#6c5ce7] to-[#a29bfe] bg-clip-text text-transparent inline-block whitespace-nowrap">시대는 끝났습니다.</span>
           </h1>
 
           <h2 className="text-lg md:text-2xl text-gray-200 font-medium leading-relaxed max-w-2xl mx-auto md:mx-0">
