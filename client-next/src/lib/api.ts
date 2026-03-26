@@ -1,4 +1,11 @@
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+// 환경 변수에서 가져온 API 베이스 주소 보정
+const getApiUrl = () => {
+  const envUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  // 끝에 /api가 없으면 붙여줌 (로컬/프로덕션 공통)
+  return envUrl.endsWith("/api") ? envUrl : `${envUrl}/api`;
+};
+
+const API = getApiUrl();
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -13,7 +20,14 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${API}${path}`, { ...options, headers });
+  const fullUrl = `${API}${path}`;
+  
+  // 디버깅용: 실 서비스에서 API 호출 경로를 확인하기 위함
+  if (process.env.NODE_ENV !== 'development') {
+    console.log(`[API Call] ${fullUrl}`);
+  }
+
+  const res = await fetch(fullUrl, { ...options, headers });
   if (!res.ok) {
     const body = await res.text();
     throw new Error(body || `HTTP ${res.status}`);
