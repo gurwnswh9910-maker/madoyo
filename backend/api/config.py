@@ -33,21 +33,25 @@ PAYAPP_USERID = os.getenv("PAYAPP_USERID")
 PAYAPP_LINKKEY = os.getenv("PAYAPP_LINKKEY")
 PAYAPP_LINKVAL = os.getenv("PAYAPP_LINKVAL")
 
-# 실 서버 배포 시 프론트엔드 도메인을 쉼표로 나열 (예: "https://madoyo.com,https://client.onrender.com")
-_cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
-CORS_ALLOWED_ORIGINS = [origin.strip() for origin in _cors_origins.split(",") if origin.strip()]
-if not CORS_ALLOWED_ORIGINS:
-    CORS_ALLOWED_ORIGINS = [
-        "https://snapthread.site",
-        "https://www.snapthread.site",
-        "https://madoyo.vercel.app",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3005",
-        "http://127.0.0.1:3005",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-    ]
+# 실 서버 배포 시 프론트엔드 도메인을 쉼표로 나열
+_cors_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "")
+CORS_ALLOWED_ORIGINS = [origin.strip() for origin in _cors_origins_env.split(",") if origin.strip()]
+
+# 기본 허용 목록 (환경 변수가 없거나 부족할 경우를 대비해 상시 추가)
+DEFAULT_ORIGINS = [
+    "https://snapthread.site",
+    "https://www.snapthread.site",
+    "https://snapthread.vercel.app",
+    "https://madoyo.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:3005",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3005",
+]
+
+for origin in DEFAULT_ORIGINS:
+    if origin not in CORS_ALLOWED_ORIGINS:
+        CORS_ALLOWED_ORIGINS.append(origin)
 
 # Celery 사용 여부 (Windows 로컬: false, Render/Linux 서버: true)
 USE_CELERY = os.getenv("USE_CELERY", "false").lower() == "true"
