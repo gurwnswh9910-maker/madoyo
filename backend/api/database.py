@@ -59,9 +59,10 @@ class MABFeedback(Base):
     user_rating = Column(String, nullable=True)     # "good" | "bad" | null
     rating_reasons = Column(JSONB, default=list)       # ["어색한 표현", "주제 무관"]
     published_url = Column(Text, nullable=True, unique=True)
-    status = Column(String(20), default="pending")  # pending, completed, rejected
+    status = Column(String(20), default="pending")  # pending, processing, completed, rejected, error
     reward_credits = Column(Integer, default=0)
     performance = Column(JSONB, default=dict)
+    scheduled_at = Column(TIMESTAMP, nullable=True)  # 성과 체크 실행 예약 시각 (24시간 뒤)
 
 class BugReport(Base):
     __tablename__ = "bug_reports"

@@ -267,42 +267,136 @@ class SubmitUrlRequest(BaseModel):
 @router.post("/generations/{gen_id}/submit-url")
 async def submit_feedback_url(gen_id: str, req: SubmitUrlRequest):
     """
-    [Track 2] 생성된 카피를 발행한 URL을 제출하여 24시간 후 크레딧 보상 큐에 등록합니다.
+    [Track 2] 생성된 카피를 발행한 URL을 제출 → DB에 실행 예약 시각 저장.
+    Celery/Redis 없이, cron-job.org의 주기적 호출로 처리합니다.
     """
     import re
-    from api.database import SessionLocal, Generation, MABFeedback
-    
-    # 1차 검증: 스레드 URL 형태
+    from datetime import datetime, timedelta
+    from api.database import SessionLocal, MABFeedback
+
     if not re.match(r'^https?://(www\.)?threads\.net/.*', req.url):
         raise HTTPException(status_code=400, detail="유효한 Threads URL이 아닙니다.")
-        
+
     db = SessionLocal()
     try:
-        # 중복 URL 제출 방지
         existing = db.query(MABFeedback).filter(MABFeedback.published_url == req.url).first()
         if existing:
             raise HTTPException(status_code=400, detail="이미 보상이 신청된 URL입니다.")
-            
-        # 큐 등록
+
         feedback = db.query(MABFeedback).filter(MABFeedback.gen_id == gen_id).first()
-        
-        # 만약 피드백 레코드가 없으면 생성
         if not feedback:
-            feedback = MABFeedback(gen_id=gen_id, status="pending")
+            feedback = MABFeedback(gen_id=gen_id)
             db.add(feedback)
-            
+
         feedback.published_url = req.url
         feedback.status = "pending"
+        # ✅ Celery 없이 DB에 예약 시각 저장 (24시간 뒤)
+        feedback.scheduled_at = datetime.utcnow() + timedelta(seconds=REWARD_COUNTDOWN_SEC)
         db.commit()
-        
-        # 보상 검증 대기 시간 (.env REWARD_COUNTDOWN_SEC: 프로덕션 86400, 테스트 30)
-        from api.worker import update_post_performance_task
-        update_post_performance_task.apply_async(args=[req.url, gen_id], countdown=REWARD_COUNTDOWN_SEC)
-        
-        return {"status": "success", "message": "성공적으로 접수되었습니다. 24시간 후 검증을 거쳐 크레딧이 지급됩니다."}
-        
+
+        return {
+            "status": "success",
+            "message": "접수 완료! 24시간 후 검증을 거쳐 크레딧이 지급됩니다.",
+            "scheduled_at": feedback.scheduled_at.isoformat()
+        }
     finally:
         db.close()
+
+
+@router.post("/process-rewards")
+async def process_due_rewards(background_tasks: BackgroundTasks):
+    """
+    [Cron Endpoint] 10분마다 cron-job.org 등 외부 서비스가 POST 호출.
+    scheduled_at이 지났고 아직 pending인 피드백을 찾아 성과 수집 + 크레딧 지급 처리.
+    Redis/Celery 없이 무료로 동작합니다.
+    """
+    from datetime import datetime
+    from api.database import SessionLocal, MABFeedback, MABEmbedding, Generation, User
+
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        due_feedbacks = (
+            db.query(MABFeedback)
+            .filter(MABFeedback.status == "pending")
+            .filter(MABFeedback.scheduled_at <= now)
+            .filter(MABFeedback.scheduled_at.isnot(None))
+            .limit(20)  # 한 번에 최대 20개 처리 (타임아웃 방지)
+            .all()
+        )
+
+        if not due_feedbacks:
+            return {"status": "ok", "processed": 0, "message": "처리할 항목 없음"}
+
+        # 처리 중 상태로 먼저 잠금 (중복 처리 방지)
+        due_ids = [f.gen_id for f in due_feedbacks]
+        for f in due_feedbacks:
+            f.status = "processing"
+        db.commit()
+        db.close()
+
+        # ✅ 실제 성과 수집은 BackgroundTask로 비동기 처리
+        def _run_reward_check(gen_ids):
+            from api.database import SessionLocal, MABFeedback, MABEmbedding, Generation, User
+            from api.services.scraper_service import get_threads_full_data, calculate_mss_from_metrics
+            from embedding_utils import EmbeddingManager
+
+            _db = SessionLocal()
+            emb_mgr = EmbeddingManager()
+            try:
+                for gid in gen_ids:
+                    feedback = _db.query(MABFeedback).filter(MABFeedback.gen_id == gid).first()
+                    if not feedback:
+                        continue
+                    try:
+                        url = feedback.published_url
+                        data = get_threads_full_data(url)
+
+                        if not data or not data.get("content_text"):
+                            feedback.status = "rejected"
+                            _db.commit()
+                            continue
+
+                        mss = calculate_mss_from_metrics(data)
+                        content_text = data["content_text"]
+
+                        # 임베딩 학습 데이터 추가
+                        vector = emb_mgr.get_embedding(content_text)
+                        _db.add(MABEmbedding(
+                            content_text=content_text,
+                            mss_score=mss,
+                            embedding=vector,
+                            is_global=True,
+                            metadata_json={"source": "feedback_reward", "url": url, "metrics": data}
+                        ))
+
+                        # 크레딧 지급
+                        feedback.performance = data
+                        feedback.status = "completed"
+                        feedback.reward_credits = 2
+
+                        gen = _db.query(Generation).filter(Generation.id == gid).first()
+                        if gen and gen.user_id:
+                            user = _db.query(User).filter(User.id == gen.user_id).first()
+                            if user:
+                                user.credits += 2
+
+                        _db.commit()
+                        print(f"[Reward] ✅ 완료: {url} → 2 크레딧 지급")
+
+                    except Exception as e:
+                        feedback.status = "error"
+                        _db.commit()
+                        print(f"[Reward] ❌ 오류 ({gid}): {e}")
+            finally:
+                _db.close()
+
+        background_tasks.add_task(_run_reward_check, due_ids)
+        return {"status": "ok", "processed": len(due_ids), "gen_ids": [str(i) for i in due_ids]}
+
+    except Exception as e:
+        db.close()
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ════════════════════════════════════════════════════════════════
 # 카피 수정 (챗봇)
