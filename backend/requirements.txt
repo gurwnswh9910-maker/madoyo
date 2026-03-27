@@ -22,3 +22,4 @@ numpy
 scikit-learn
 google-generativeai
 sentence-transformers
+opencv-python-headless
