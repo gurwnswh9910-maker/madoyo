@@ -29,6 +29,25 @@ from api.routers import generation, upload, feedback, auth, billing, media
 from api.config import CORS_ALLOWED_ORIGINS
 
 # ════════════════════════════════════════════════════════════════
+# 앱 시작 시 자동 마이그레이션 (DB 구조 동기화)
+# ════════════════════════════════════════════════════════════════
+@app.on_event("startup")
+async def startup_event():
+    """서버 기동 시 필요한 DB 스키마 변경 사항을 강제로 적용합니다."""
+    try:
+        from api.database import SessionLocal
+        from sqlalchemy import text
+        db = SessionLocal()
+        # MAB 보상 예약 기능에 필요한 scheduled_at 컬럼 자동 추가
+        db.execute(text("ALTER TABLE mab_feedback_loop ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMP;"))
+        db.commit()
+        db.close()
+        print("✅ DB Migration Successful: scheduled_at column checked.")
+    except Exception as e:
+        print(f"⚠️ Startup Migration Failed (Ignored if already exists): {e}")
+
+
+# ════════════════════════════════════════════════════════════════
 # FastAPI 앱 생성
 # ════════════════════════════════════════════════════════════════
 app = FastAPI(
