@@ -2,16 +2,26 @@ import os
 import requests
 import tempfile
 import time
-import cv2
 import json
 from google import genai
 from google.genai import types
 
+# ✅ 서버 부팅 보호: 서버 환경에 따라 cv2(OpenCV) 로드 실패 시에도 서버가 죽지 않도록 방어
+try:
+    import cv2
+    HAS_CV2 = True
+except ImportError:
+    print("⚠️ Warning: OpenCV (cv2) not found or system libraries missing. Video frame extraction disabled.")
+    HAS_CV2 = False
+
 def extract_frames(video_path, max_frames=5):
     """
-    동영상에서 주요 프레임을 추출하여 저장된 로컬 경로 리스트를 반환합니다.
-    분석용으로만 사용되며, 업로드에는 사용되지 않습니다.
+    동영상에서 주요 프레임을 추출합니다. (OpenCV가 사용 가능할 때만 작동)
     """
+    if not HAS_CV2:
+        print("    ⚠️ OpenCV가 설치되지 않아 동영상 프레임 추출을 건너뜁니다.")
+        return []
+
     frames_paths = []
     try:
         cap = cv2.VideoCapture(video_path)
