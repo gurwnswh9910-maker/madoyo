@@ -194,6 +194,7 @@ def run_optimization(original_copy: str, product_focus, input_image_urls: list =
         else:
             print("    ⚠️  기존 게시물 데이터(dotori.xlsx 등)가 없어 빈 데이터셋으로 시작합니다.")
             korean_data = pd.DataFrame(columns=['본문', 'MSS', '링크'])
+            korean_data['MSS'] = pd.to_numeric(korean_data['MSS'], errors='coerce').fillna(0)
         shared_resources['korean_data'] = korean_data
         
     # 1-2. EmbeddingManager 로드
