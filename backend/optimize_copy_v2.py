@@ -189,7 +189,11 @@ def run_optimization(original_copy: str, product_focus, input_image_urls: list =
     korean_data = shared_resources.get('korean_data')
     if korean_data is None:
         all_data = integrator.process_all_data(DynamicMAB())
-        korean_data = all_data[all_data['본문'].apply(is_korean)].drop_duplicates(subset='본문').copy()
+        if all_data is not None and not all_data.empty and '본문' in all_data.columns:
+            korean_data = all_data[all_data['본문'].apply(is_korean)].drop_duplicates(subset='본문').copy()
+        else:
+            print("    ⚠️  기존 게시물 데이터(dotori.xlsx 등)가 없어 빈 데이터셋으로 시작합니다.")
+            korean_data = pd.DataFrame(columns=['본문', 'MSS', '링크'])
         shared_resources['korean_data'] = korean_data
         
     # 1-2. EmbeddingManager 로드
