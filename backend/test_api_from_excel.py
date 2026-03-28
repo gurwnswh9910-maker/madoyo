@@ -49,7 +49,10 @@ def run_test():
                         break
         except Exception as e:
             print(f"Failed to parse JSON or poll: {e}")
-            print(f"Raw response: {response.text}")
+            if 'st_resp' in locals():
+                print(f"Raw status response: {st_resp.text}")
+            else:
+                print(f"Raw initial response: {response.text}")
             
     except Exception as e:
         print(f"Error: {e}")

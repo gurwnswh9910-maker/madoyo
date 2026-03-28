@@ -42,7 +42,7 @@ LOCAL_TASKS = {}
 # ════════════════════════════════════════════════════════════════
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check():
+def health_check():
     """서버 상태 확인"""
     data_cache_exists = os.path.exists(os.path.join(BASE_PATH, "data_cache.pkl"))
     embeddings_exist = os.path.exists(os.path.join(BASE_PATH, "embeddings.pkl"))
@@ -54,11 +54,15 @@ async def health_check():
 
 
 # ════════════════════════════════════════════════════════════════
-# 카피 생성
+# 카피 생성 (★ AI 에이전트 필독: 절대 동기식으로 바꾸지 마시오 ★)
+# 이 엔드포인트는 시간(30초 이상)이 걸리는 스크래핑/LLM 로직이 있으므로,
+# 무조건 작업(Task_ID)을 먼저 발급하고 백그라운드(`BackgroundTasks`)로 던져야 합니다.
+# 로컬 코드(`작동중코드`)를 API에 이식할 때, 응답 대기(Blocking) 형태로 짜면 
+# Render 배포 시 100% Timeout 서버 다운이 발생합니다.
 # ════════════════════════════════════════════════════════════════
 
 @router.post("/generate", response_model=TaskResponse)
-async def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks):
+def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks):
     """
     카피 생성 요청 접수 (비동기).
     
@@ -68,10 +72,27 @@ async def generate_copy(request: GenerateRequest, background_tasks: BackgroundTa
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY가 설정되지 않았습니다.")
     
+    from api.database import SessionLocal, Generation
+    db = SessionLocal()
+    
     try:
         # Step 1: 비동기 태스크 호출 (스크래핑/분석 포함)
         if USE_CELERY:
             from api.worker import optimize_copy_task
+            # Celery 사용 시에도 DB 레코드를 먼저 생성하여 일관성 유지
+            gen = Generation(
+                status="pending",
+                input_config={
+                    "reference_copy": request.reference_copy,
+                    "image_urls": request.image_urls,
+                    "reference_url": request.reference_url,
+                    "appeal_point": request.appeal_point
+                }
+            )
+            db.add(gen)
+            db.commit()
+            db.refresh(gen)
+            
             task = optimize_copy_task.delay(
                 reference_copy=request.reference_copy,
                 image_urls=request.image_urls,
@@ -81,23 +102,38 @@ async def generate_copy(request: GenerateRequest, background_tasks: BackgroundTa
                 model_name=MODEL_NAME,
                 user_id=None # 현재는 단일 유저
             )
-            return TaskResponse(task_id=task.id, status="PENDING")
+            return TaskResponse(task_id=str(gen.id), status="PENDING")
         else:
             # [ONLINE-ISOLATION] 환경 변수에 따른 엔진 스위칭
             import uuid
-            task_id = str(uuid.uuid4())
-            LOCAL_TASKS[task_id] = {"status": "PENDING"}
+            # DB 레코드 생성 (Task ID 역할)
+            gen = Generation(
+                status="processing",
+                input_config={
+                    "reference_copy": request.reference_copy,
+                    "image_urls": request.image_urls,
+                    "reference_url": request.reference_url,
+                    "appeal_point": request.appeal_point
+                }
+            )
+            db.add(gen)
+            db.commit()
+            db.refresh(gen)
+            task_id = str(gen.id)
+
             IS_ONLINE = os.getenv("IS_ONLINE", "False").lower() == "true"
             
             def run_local_task(t_id, req, api_key, m_name, u_id):
+                from api.database import SessionLocal, Generation
+                import uuid as uuid_pkg
+                _db = SessionLocal()
+                
                 if IS_ONLINE:
                     from optimize_copy_online import run_optimization_online as run_optimized_engine
                 else:
                     from optimize_copy_v2 import run_optimization as run_optimized_engine
                 
                 try:
-                    LOCAL_TASKS[t_id]["status"] = "PROGRESS"
-                    
                     # ── 배경에서 컨텍스트 빌딩 (스크래핑 등) 수행 ──
                     from api.services.context_builder import build_context
                     product_focus, original_copy = build_context(
@@ -132,11 +168,24 @@ async def generate_copy(request: GenerateRequest, background_tasks: BackgroundTa
                             "score": res.get("score_data", {}).get("mss_score_estimate", 0),
                             "reason": res.get("score_data", {}).get("reason", "")
                         })
-                    LOCAL_TASKS[t_id] = {"status": "SUCCESS", "result": {"copies": formatted_copies}}
+                    
+                    # DB 업데이트
+                    gen_record = _db.query(Generation).filter(Generation.id == uuid_pkg.UUID(t_id)).first()
+                    if gen_record:
+                        gen_record.status = "completed"
+                        gen_record.results = {"copies": formatted_copies}
+                        _db.commit()
                 except Exception as e:
                     import traceback
                     print(traceback.format_exc())
-                    LOCAL_TASKS[t_id] = {"status": "FAILURE", "error": str(e)}
+                    # 에러 상태 기록
+                    gen_record = _db.query(Generation).filter(Generation.id == uuid_pkg.UUID(t_id)).first()
+                    if gen_record:
+                        gen_record.status = "error"
+                        gen_record.results = {"error": str(e)}
+                        _db.commit()
+                finally:
+                    _db.close()
 
             background_tasks.add_task(
                 run_local_task,
@@ -151,24 +200,45 @@ async def generate_copy(request: GenerateRequest, background_tasks: BackgroundTa
     except Exception as e:
         print(f"\n[API] ❌ 카피 생성 요청 중 오류: {e}")
         raise HTTPException(status_code=500, detail=f"작업 접수 중 오류 발생: {str(e)}")
+    finally:
+        db.close()
 
 
 @router.get("/tasks/{task_id}", response_model=TaskStatusResponse)
-async def get_task_status(task_id: str):
+def get_task_status(task_id: str):
     """
     비동기 작업의 진행 상태 및 결과를 조회합니다 (Polling).
     """
     if not USE_CELERY:
-        if task_id in LOCAL_TASKS:
-            task_info = LOCAL_TASKS[task_id]
-            response = {"task_id": task_id, "status": task_info["status"]}
-            if task_info["status"] == "SUCCESS":
-                response["result"] = task_info.get("result")
-            elif task_info["status"] == "FAILURE":
-                response["error"] = task_info.get("error")
-            return response
-        else:
-            return {"task_id": task_id, "status": "FAILURE", "error": "Task not found"}
+        from api.database import SessionLocal, Generation
+        import uuid
+        db = SessionLocal()
+        try:
+            try:
+                gid = uuid.UUID(task_id)
+            except:
+                return {"task_id": task_id, "status": "FAILURE", "error": "Invalid Task ID format"}
+                
+            gen = db.query(Generation).filter(Generation.id == gid).first()
+            if gen:
+                # DB 상태 -> TaskStatusResponse 맵핑
+                status_map = {
+                    "processing": "PROGRESS",
+                    "completed": "SUCCESS",
+                    "error": "FAILURE",
+                    "pending": "PENDING"
+                }
+                status = status_map.get(gen.status, "PROGRESS")
+                response = {"task_id": task_id, "status": status}
+                if gen.status == "completed":
+                    response["result"] = gen.results
+                elif gen.status == "error":
+                    response["error"] = gen.results.get("error", "Unknown error")
+                return response
+            else:
+                return {"task_id": task_id, "status": "FAILURE", "error": "Task not found in database"}
+        finally:
+            db.close()
 
     from api.worker import celery_app
     from celery.result import AsyncResult
@@ -196,7 +266,7 @@ async def get_task_status(task_id: str):
 
 
 @router.get("/generations/me")
-async def get_my_generations(current_user=Depends(get_current_user)):
+def get_my_generations(current_user=Depends(get_current_user)):
     """
     내 카피 생성 히스토리를 반환합니다. (최대 1일 보관)
     """
@@ -234,7 +304,7 @@ async def get_my_generations(current_user=Depends(get_current_user)):
         db.close()
 
 @router.get("/generations/{gen_id}")
-async def get_generation_detail(gen_id: str, current_user=Depends(get_current_user)):
+def get_generation_detail(gen_id: str, current_user=Depends(get_current_user)):
     """
     특정 카피 생성 상세 정보를 조회합니다.
     """
@@ -273,7 +343,7 @@ class SubmitUrlRequest(BaseModel):
     url: str
 
 @router.post("/generations/{gen_id}/submit-url")
-async def submit_feedback_url(gen_id: str, req: SubmitUrlRequest):
+def submit_feedback_url(gen_id: str, req: SubmitUrlRequest):
     """
     [Track 2] 생성된 카피를 발행한 URL을 제출 → DB에 실행 예약 시각 저장.
     Celery/Redis 없이, cron-job.org의 주기적 호출로 처리합니다.
@@ -312,7 +382,7 @@ async def submit_feedback_url(gen_id: str, req: SubmitUrlRequest):
 
 
 @router.post("/process-rewards")
-async def process_due_rewards(background_tasks: BackgroundTasks):
+def process_due_rewards(background_tasks: BackgroundTasks):
     """
     [Cron Endpoint] 10분마다 cron-job.org 등 외부 서비스가 POST 호출.
     scheduled_at이 지났고 아직 pending인 피드백을 찾아 성과 수집 + 크레딧 지급 처리.
@@ -517,7 +587,7 @@ async def process_due_rewards(background_tasks: BackgroundTasks):
 # ════════════════════════════════════════════════════════════════
 
 @router.post("/refine", response_model=RefineResponse)
-async def refine_copy(request: RefineRequest, current_user=Depends(get_current_user)):
+def refine_copy(request: RefineRequest, current_user=Depends(get_current_user)):
     """
     생성된 카피를 유저 요청에 맞게 미세 수정합니다.
     가벼운 단일 LLM 호출로 처리합니다.

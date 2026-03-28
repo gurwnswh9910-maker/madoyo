@@ -46,7 +46,33 @@ def get_threads_full_data(url):
     if "threads.com" in url:
         url = url.replace("threads.com", "threads.net")
 
-    driver = Driver(uc=True, headless=True)
+    import os
+    # Render Docker 환경 기준 경로 (자동 설치된 google-chrome)
+    chrome_bin = os.environ.get("CHROME_BIN", "/usr/bin/google-chrome")
+    
+    # [극한의 512MB RAM 생존용 Chrome 최적화 옵션]
+    extra_args = [
+        "--no-sandbox", 
+        "--disable-dev-shm-usage", 
+        "--disable-gpu",
+        "--disable-software-rasterizer",
+        "--single-process",
+        "--disable-background-networking",
+        "--disable-background-timer-throttling",
+        "--disable-client-side-phishing-detection",
+        "--disable-default-apps",
+        "--disable-extensions",
+        "--mute-audio",
+        "--blink-settings=imagesEnabled=false" # 이미지 로드 제한 (속도/메모리 확보)
+    ]
+    
+    driver = Driver(
+        uc=True, 
+        headless=True, 
+        browser="chrome",
+        binary_location=chrome_bin,
+        extra_args=extra_args
+    )
     try:
         driver.get(url)
         print(f"    [Research] {url} 접속 및 8초 대기...", flush=True)
