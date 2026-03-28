@@ -13,10 +13,13 @@ import os
 import sys
 import traceback
 
-# 코어 모듈 경로 보장
+# 코어 모듈 경로 추가 (backend 및 상위 폴더 지원)
 _code_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _code_dir not in sys.path:
-    sys.path.insert(0, _code_dir)
+_parent_dir = os.path.dirname(_code_dir)
+
+for d in [_code_dir, _parent_dir]:
+    if d and d not in sys.path:
+        sys.path.insert(0, d)
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse

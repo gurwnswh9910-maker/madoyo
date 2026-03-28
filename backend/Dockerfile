@@ -2,21 +2,25 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 필수 기본 라이브러리 및 DB(PostgreSQL) 연결을 위한 라이브러리만 설치
+# 필수 기본 라이브러리 및 DB(PostgreSQL) 연결을 위한 라이브러리 설치
 RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# 의존성 파일 복사 및 설치
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# [MVP V7] 서버에서 크롬을 직접 띄우지 않으므로 크롬 설치 및 드라이버 다운로드 과정 삭제 (빌드 에러 및 OOM 방지)
+# [V7-Fix] 컨테이너 내부 구조를 로컬과 동일하게 /app/backend/... 순으로 구성
+# 이렇게 하면 backend.api.main:app 접근이 항상 가능해집니다.
+COPY . /app/backend/
+WORKDIR /app/backend
 
-COPY . .
-
-# 환경 변수 설정
+# 환경 변수 및 PYTHONPATH 설정 (모든 경로에서 모듈을 찾을 수 있도록 함)
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app:/app/backend
 
-# 실행 명령어 (워커 1개, 타임아웃 10분 고정 - OOM 및 타임아웃 방지용 설정 유지)
+# 실행 명령어 (워커 1개, 타임아웃 10분)
+# 이제 컨테이너 내부 WORKDIR가 /app/backend이므로 api.main:app으로 실행 가능합니다.
 CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "api.main:app", "--bind", "0.0.0.0:10000", "--timeout", "600"]
