@@ -183,9 +183,10 @@ def scrape_and_generate_single_task(self, url, bulk_job_id, uploader_id=None, is
         mss = calculate_mss_from_metrics(data)
         
         # 2. 임베딩(학습 데이터 추가)
-        vector = emb_mgr.get_embedding(content_text)
+        vector = emb_mgr.get_text_embedding(content_text)
         new_entry = MABEmbedding(
             content_text=content_text,
+            embedding_type="text",
             mss_score=mss,
             embedding=vector,
             uploader_id=uploader_id,
@@ -300,9 +301,10 @@ def update_post_performance_task(self, url, feedback_id):
         content_text = data["content_text"]
         
         # 임베딩 추가 (지식 최신화)
-        vector = emb_mgr.get_embedding(content_text)
+        vector = emb_mgr.get_text_embedding(content_text)
         entry = MABEmbedding(
             content_text=content_text,
+            embedding_type="text",
             mss_score=mss,
             embedding=vector,
             is_global=True,

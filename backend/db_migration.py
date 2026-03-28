@@ -84,6 +84,7 @@ def migrate_data():
                 uploader_id=admin_user.id if is_user else None,
                 is_global=not is_user,
                 content_text=text,
+                embedding_type="text",
                 embedding=vec,
                 mss_score=float(row.get('MSS', 0.0)),
                 metadata_json={
@@ -114,6 +115,7 @@ def migrate_data():
                     uploader_id=None,
                     is_global=True,
                     content_text=text,
+                    embedding_type="text",
                     embedding=vec,
                     mss_score=0.0,
                     metadata_json={"type": "legacy_orphan"}

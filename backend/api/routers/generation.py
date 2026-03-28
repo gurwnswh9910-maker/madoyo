@@ -98,16 +98,21 @@ async def generate_copy(request: GenerateRequest, background_tasks: BackgroundTa
             )
             return TaskResponse(task_id=task.id, status="PENDING")
         else:
-            # 로컬 BackgroundTasks 사용 (Redis/Celery 우회)
+            # [ONLINE-ISOLATION] 환경 변수에 따른 엔진 스위칭
             import uuid
             task_id = str(uuid.uuid4())
-            LOCAL_TASKS[task_id] = {"status": "PENDING", "result": None, "error": None}
+            LOCAL_TASKS[task_id] = {"status": "PENDING"}
+            IS_ONLINE = os.getenv("IS_ONLINE", "False").lower() == "true"
             
             def run_local_task(t_id, copy_text, focus_text, api_key, m_name, u_id):
-                from optimize_copy_v2 import run_optimization
+                if IS_ONLINE:
+                    from optimize_copy_online import run_optimization_online as run_optimized_engine
+                else:
+                    from optimize_copy_v2 import run_optimization as run_optimized_engine
+                
                 try:
                     LOCAL_TASKS[t_id]["status"] = "PROGRESS"
-                    results = run_optimization(
+                    results = run_optimized_engine(
                         original_copy=copy_text,
                         product_focus=focus_text,
                         api_key=api_key,
@@ -318,76 +323,182 @@ async def process_due_rewards(background_tasks: BackgroundTasks):
         now = datetime.utcnow()
         due_feedbacks = (
             db.query(MABFeedback)
-            .filter(MABFeedback.status == "pending")
+            .filter(MABFeedback.status.in_(["pending", "staged"]))
             .filter(MABFeedback.scheduled_at <= now)
             .filter(MABFeedback.scheduled_at.isnot(None))
-            .limit(20)  # 한 번에 최대 20개 처리 (타임아웃 방지)
+            .limit(20)
             .all()
         )
 
         if not due_feedbacks:
             return {"status": "ok", "processed": 0, "message": "처리할 항목 없음"}
 
-        # 처리 중 상태로 먼저 잠금 (중복 처리 방지)
         due_ids = [f.gen_id for f in due_feedbacks]
+        # processing 상태로 임시 잠금
         for f in due_feedbacks:
             f.status = "processing"
         db.commit()
         db.close()
 
-        # ✅ 실제 성과 수집은 BackgroundTask로 비동기 처리
         def _run_reward_check(gen_ids):
             from api.database import SessionLocal, MABFeedback, MABEmbedding, Generation, User
             from api.services.scraper_service import get_threads_full_data, calculate_mss_from_metrics
-            from embedding_utils import EmbeddingManager
+            import os
+            import json
+            from datetime import datetime, timedelta
+
+            IS_ONLINE = os.getenv("IS_ONLINE", "False").lower() == "true"
+            if IS_ONLINE:
+                from embedding_utils_online import EmbeddingManager
+            else:
+                from embedding_utils import EmbeddingManager
 
             _db = SessionLocal()
             emb_mgr = EmbeddingManager()
             try:
                 for gid in gen_ids:
                     feedback = _db.query(MABFeedback).filter(MABFeedback.gen_id == gid).first()
-                    if not feedback:
-                        continue
-                    try:
-                        url = feedback.published_url
-                        data = get_threads_full_data(url)
+                    if not feedback: continue
+                    
+                    # ══════════════════════════════════════════════════════════
+                    # [Phase 1: pending] 성과 수집 및 Gemini File API 업로드
+                    # ══════════════════════════════════════════════════════════
+                    if feedback.performance.get("_phase") != "staged":
+                        print(f"[Reward Phase 1] 성과 수집 시작: {feedback.published_url}")
+                        try:
+                            url = feedback.published_url
+                            data = get_threads_full_data(url)
 
-                        if not data or not data.get("content_text"):
-                            feedback.status = "rejected"
+                            if not data or not data.get("content_text"):
+                                feedback.status = "rejected"
+                                _db.commit()
+                                continue
+
+                            mss = calculate_mss_from_metrics(data)
+                            content_text = data["content_text"]
+                            
+                            performance_data = {
+                                "본문": content_text,
+                                "조회수": data["views"],
+                                "좋아요": data["likes"],
+                                "댓글": data["replies"],
+                                "리포스트": data.get("reposts", 0),
+                                "공유수": data.get("shares", 0),
+                                "첫댓글조회수": data.get("first_reply_views", 0),
+                                "작성시간": data.get("created_at", ""),
+                                "mss_score": mss,
+                                "_phase": "staged"
+                            }
+
+                            # 이미지 업로드 (Gemini File API)
+                            file_api_info = {}
+                            if IS_ONLINE:
+                                media_urls = data.get("image_urls", [])
+                                if media_urls:
+                                    temp_path, is_temp = emb_mgr._prepare_media_data(media_urls[0])
+                                    if temp_path:
+                                        file_obj = emb_mgr.upload_to_gemini_file_api(temp_path)
+                                        if file_obj:
+                                            file_api_info = {"name": file_obj.name, "uri": file_obj.uri}
+                                        if is_temp: os.remove(temp_path)
+
+                            performance_data["file_api"] = file_api_info
+                            feedback.performance = performance_data
+                            
+                            # ✅ 1시간 유예 상태로 전이
+                            feedback.status = "staged"
+                            feedback.scheduled_at = datetime.utcnow() + timedelta(hours=1)
                             _db.commit()
+                            print(f"[Reward Phase 1] ✅ 수집 완료 및 File API 업로드. 1시간 유예 시작.")
                             continue
 
-                        mss = calculate_mss_from_metrics(data)
-                        content_text = data["content_text"]
+                        except Exception as e:
+                            feedback.status = "error"
+                            _db.commit()
+                            print(f"[Reward Phase 1] ❌ 에러: {e}")
+                            continue
 
-                        # 임베딩 학습 데이터 추가
-                        vector = emb_mgr.get_embedding(content_text)
-                        _db.add(MABEmbedding(
-                            content_text=content_text,
-                            mss_score=mss,
-                            embedding=vector,
-                            is_global=True,
-                            metadata_json={"source": "feedback_reward", "url": url, "metrics": data}
-                        ))
+                    # ══════════════════════════════════════════════════════════
+                    # [Phase 2: staged] 지연 임베딩 및 파일 삭제
+                    # ══════════════════════════════════════════════════════════
+                    else:
+                        print(f"[Reward Phase 2] 지연 임베딩 시작: {feedback.published_url}")
+                        try:
+                            perf = feedback.performance
+                            file_info = perf.get("file_api", {})
+                            file_uri = file_info.get("uri")
+                            file_name = file_info.get("name")
+                            content_text = perf.get("본문")
+                            mss = perf.get("mss_score", 0.0)
 
-                        # 크레딧 지급
-                        feedback.performance = data
-                        feedback.status = "completed"
-                        feedback.reward_credits = 2
+                            if IS_ONLINE and file_uri:
+                                # 트리플 벡터 동시 생성
+                                text_vec = emb_mgr.get_text_embedding(text=content_text, use_db=False)
+                                visual_vec = emb_mgr.get_multimodal_embedding(file_uri=file_uri, use_db=False)
+                                joint_vec = emb_mgr.get_multimodal_embedding(text=content_text, file_uri=file_uri, use_db=False)
+                                
+                                if text_vec is not None and visual_vec is not None and joint_vec is not None:
+                                    # ✅ [무결성 검증] 텍스트 벡터와 조인트 벡터가 유의미하게 다른지 자체 체크
+                                    similarity = emb_mgr.calculate_similarity(text_vec, joint_vec)
+                                    is_distinct = similarity < 0.999
+                                    
+                                    if not is_distinct:
+                                        print(f"[Reward Phase 2] ⚠️ 조인트 벡터 검증 실패 (유사도 {similarity:.6f}). 인덱싱 미완료 가능성. 10분 후 재시도.")
+                                        feedback.status = "staged"
+                                        feedback.scheduled_at = datetime.utcnow() + timedelta(minutes=10)
+                                        _db.commit()
+                                        continue
+                                    
+                                    print(f"[Reward Phase 2] ✨ 트리플 벡터 검증 통과 (유사도 {similarity:.6f}). 보상 마감 진행.")
+                                    
+                                    # ✅ 응답이 확실히 오면 파일 삭제
+                                    emb_mgr.delete_from_gemini_file_api(file_name)
+                                    
+                                    # 임베딩 학습 데이터 저장
+                                    perf["similarity_score"] = float(similarity)
+                                    meta_data = {"source": "feedback_reward", "url": feedback.published_url, "metrics": perf}
+                                    
+                                    # 3종 벡터 한 번에 저장
+                                    emb_mgr.save_triple_to_db(
+                                        content_text=content_text,
+                                        text_vec=text_vec,
+                                        visual_vec=visual_vec,
+                                        joint_vec=joint_vec,
+                                        mss_score=mss,
+                                        is_global=True,
+                                        metadata=meta_data
+                                    )
+                                else:
+                                    # 임베딩 호출 자체 실패 시 재시도
+                                    print(f"[Reward Phase 2] ⚠️ 일부 임베딩 호출 실패. 10분 후 재시도.")
+                                    feedback.status = "staged"
+                                    feedback.scheduled_at = datetime.utcnow() + timedelta(minutes=10)
+                                    _db.commit()
+                                    continue
+                            else:
+                                # 이미지가 없거나 로컬 환경인 경우 즉시 마감
+                                text_vec = emb_mgr.get_text_embedding(content_text, use_db=False)
+                                if text_vec is not None:
+                                    if IS_ONLINE:
+                                        meta_data = {"source": "feedback_reward", "url": feedback.published_url, "metrics": perf}
+                                        emb_mgr.save_triple_to_db(content_text, text_vec, None, None, mss, True, meta_data)
+                                    else:
+                                        _db.add(MABEmbedding(content_text=content_text, embedding_type="text", mss_score=mss, embedding=text_vec, is_global=True, metadata_json={"source": "feedback_reward", "metrics": perf}))
 
-                        gen = _db.query(Generation).filter(Generation.id == gid).first()
-                        if gen and gen.user_id:
-                            user = _db.query(User).filter(User.id == gen.user_id).first()
-                            if user:
-                                user.credits += 2
+                            # 최종 마감 및 크레딧
+                            feedback.status = "completed"
+                            feedback.reward_credits = 2
+                            gen = _db.query(Generation).filter(Generation.id == gid).first()
+                            if gen and gen.user_id:
+                                user = _db.query(User).filter(User.id == gen.user_id).first()
+                                if user: user.credits += 2
+                            _db.commit()
+                            print(f"[Reward Phase 2] 🏁 보상 지급 완료 및 파일 정리 성공.")
 
-                        _db.commit()
-                        print(f"[Reward] ✅ 완료: {url} → 2 크레딧 지급")
-
-                    except Exception as e:
-                        feedback.status = "error"
-                        _db.commit()
-                        print(f"[Reward] ❌ 오류 ({gid}): {e}")
+                        except Exception as e:
+                            print(f"[Reward Phase 2] ❌ 에러: {e}")
+                            feedback.status = "error"
+                            _db.commit()
             finally:
                 _db.close()
 

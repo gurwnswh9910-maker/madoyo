@@ -20,13 +20,13 @@ class CopyScorer:
         try:
             # 1. Fetch Top 5% Global or User-specific data
             # Logic: Higher MSS is better.
-            top_query = db.query(MABEmbedding).order_by(MABEmbedding.mss_score.desc()).limit(20).all()
+            top_query = db.query(MABEmbedding).filter(MABEmbedding.embedding_type.in_(["text", "multi"])).order_by(MABEmbedding.mss_score.desc()).limit(20).all()
             top_vectors = [np.array(e.embedding) for e in top_query if e.embedding is not None]
             if top_vectors:
                 self.ref_vectors['avg_top'] = np.mean(top_vectors, axis=0).reshape(1, -1)
             
             # 2. Fetch Low 10% 
-            low_query = db.query(MABEmbedding).filter(MABEmbedding.mss_score > 0).order_by(MABEmbedding.mss_score.asc()).limit(10).all()
+            low_query = db.query(MABEmbedding).filter(MABEmbedding.embedding_type.in_(["text", "multi"]), MABEmbedding.mss_score > 0).order_by(MABEmbedding.mss_score.asc()).limit(10).all()
             low_vectors = [np.array(e.embedding) for e in low_query if e.embedding is not None]
             if low_vectors:
                 self.ref_vectors['avg_low'] = np.mean(low_vectors, axis=0).reshape(1, -1)
@@ -39,7 +39,7 @@ class CopyScorer:
                 if isinstance(product_info, dict):
                     text_to_embed = product_info.get('marketing_insight') or product_info.get('insight') or str(product_info)
                 
-                prod_vector = self.emb_mgr.get_embedding(text_to_embed)
+                prod_vector = self.emb_mgr.get_text_embedding(text_to_embed)
                 if prod_vector is not None:
                     self.ref_vectors['product'] = np.array(prod_vector).reshape(1, -1)
         finally:
@@ -103,7 +103,7 @@ class CopyScorer:
         if not self.ref_vectors:
             self.prepare_reference_vectors(product_info, user_id)
         
-        cand_vector = np.array(self.emb_mgr.get_embedding(candidate_copy)).reshape(1, -1)
+        cand_vector = np.array(self.emb_mgr.get_text_embedding(candidate_copy)).reshape(1, -1)
         batch_res = self.score_batch([{"id": "single", "copy": candidate_copy, "embedding": cand_vector[0]}], product_info, user_id)
         return batch_res[0]["score_data"]
 

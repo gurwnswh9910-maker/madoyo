@@ -12,7 +12,7 @@ class StrategyClusterer:
         Use these as initial centroids for strategic clusters.
         """
         for i, post in enumerate(sample_posts):
-            vector = self.embed_mgr.get_embedding(post['본문'])
+            vector = self.embed_mgr.get_text_embedding(post['본문'])
             if vector is not None:
                 self.clusters[f"Cluster_{i+1}"] = {
                     'centroid': np.array(vector),
@@ -22,7 +22,7 @@ class StrategyClusterer:
                 }
 
     def get_closest_cluster(self, text):
-        vector = self.embed_mgr.get_embedding(text)
+        vector = self.embed_mgr.get_text_embedding(text)
         if vector is None or not self.clusters:
             return None
         
@@ -43,7 +43,7 @@ class StrategyClusterer:
         """
         Compare product info with cluster centroids to boost relevant strategies.
         """
-        product_vector = self.embed_mgr.get_embedding(product_info)
+        product_vector = self.embed_mgr.get_text_embedding(product_info)
         if product_vector is None:
             return {cid: 1.0 for cid in self.clusters}
         

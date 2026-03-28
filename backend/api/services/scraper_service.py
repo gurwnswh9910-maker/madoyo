@@ -38,8 +38,10 @@ def parse_metric_to_int(val):
 
 def get_threads_full_data(url):
     """
-    Threads 게시물의 본문 텍스트, 조회수, 좋아요, 답글 수 등을 추출합니다.
-    [자동화/scraper.py] 로직을 이식하여 '활동 보기' 버튼 없이도 본문을 정확히 추출합니다.
+    [Advanced Research Engine] 
+    1. '자동화/scraper.py'의 실전 비기(경계선 탐지, 캐러셀 클릭)
+    2. 'makingprogram.py'의 성과 지표(리포스트, 첫댓글조회수)
+    두 로직을 결합하여 로그인 없이도 완벽한 데이터를 수집합니다.
     """
     if "threads.com" in url:
         url = url.replace("threads.com", "threads.net")
@@ -47,118 +49,126 @@ def get_threads_full_data(url):
     driver = Driver(uc=True, headless=True)
     try:
         driver.get(url)
-        time.sleep(8) # 충분한 렌더링 대기
+        print(f"    [Research] {url} 접속 및 8초 대기...", flush=True)
+        time.sleep(8) 
         
         data = {
             "content_text": "",
             "views": 0,
             "likes": 0,
             "replies": 0,
+            "reposts": 0,
+            "shares": 0,
+            "created_at": "",
             "image_urls": [],
             "first_reply_views": 0
         }
 
-        # 1. 전역 지표 시도 (조회수 등)
-        data["views"] = parse_metric_to_int(get_views_global(driver))
+        # --- 1. 캐러셀 강제 클릭 (지연 로딩 대응) ---
+        try:
+            for _ in range(5):
+                next_btns = driver.find_elements(By.CSS_SELECTOR, "div[role='button'][aria-label='Next'], div[role='button'][aria-label='다음']")
+                visible_next = [b for b in next_btns if b.is_displayed()]
+                if visible_next:
+                    driver.execute_script("arguments[0].click();", visible_next[0])
+                    time.sleep(1.0)
+                else: break
+        except: pass
 
-        # 2. [자동화 로직 핵심] JS 기반 본문 및 인터랙션 고립 추출
+        # --- 2. 본문/댓글 경계 Y 탐지 (인기순/Most relevant 기준) ---
+        boundary_y = 99999
+        try:
+            boundary_els = driver.find_elements(By.XPATH, "//*[contains(text(),'인기순') or contains(text(),'Most relevant')]")
+            for el in boundary_els:
+                y = el.location.get('y', 0)
+                if y > 100:
+                    boundary_y = y
+                    break
+        except: pass
+
+        # --- 3. JS 복합 추출 엔진 (자동화/scraper.py 기법 적용) ---
         js_code = """
-        function extractMainPost() {
-            // 하트 버튼(Like)은 로그인 여부와 관계없이 게시물 하단에 존재함
+        function extractResearchData() {
             let heartBtns = Array.from(document.querySelectorAll('svg[aria-label="Like"], svg[aria-label="좋아요"]'));
-            if (heartBtns.length === 0) return {error: "No like buttons found"};
-            
-            // 상단 네비게이션 등을 제외하고 Y좌표가 어느 정도 있는 첫 번째 하트 선택
             let mainHeart = heartBtns.find(btn => btn.getBoundingClientRect().y > 50);
-            if (!mainHeart) return {error: "No valid main heart"};
+            if (!mainHeart) return {error: "No context"};
             
-            // 상위 컨테이너(게시물 블록) 고립
-            let container = mainHeart.closest('div[data-pressable-container="true"]');
+            // 컨테이너 격리
+            let container = mainHeart.closest('article') || mainHeart.closest('div[data-pressable-container="true"]');
             if (!container) {
                 let curr = mainHeart;
                 for (let i=0; i<15; i++) {
                     if (!curr) break;
-                    if (curr.getBoundingClientRect().height > 150) {
-                        container = curr;
-                        break;
-                    }
+                    let r = curr.getBoundingClientRect();
+                    if (r.height > 150 && r.width > 200) { container = curr; break; }
                     curr = curr.parentElement;
                 }
             }
-            if (!container) return {error: "No container found"};
-            
-            // 본문 텍스트 추출 (dir=auto 중 가장 긴 것)
-            let textNodes = container.querySelectorAll('[dir="auto"]');
-            let texts = [];
-            let likeText = "0", replyText = "0";
-            
-            for (let tn of textNodes) {
-                let t = tn.innerText.trim();
-                if (t.length > 5 && !['좋아요','답글','공유','리포스트','보내기','활동 보기','Follow','팔로우','인기순'].includes(t)) {
-                    texts.push(t);
-                }
-            }
-            
-            // 좋아요/답글 숫자 추출 시도 (컨테이너 내 데이터 기반)
-            // 보통 svg 옆의 span에 숫자가 들어있음
-            try {
-                let spans = container.querySelectorAll('span');
-                for (let i=0; i < spans.length; i++) {
-                    let s = spans[i].innerText;
-                    if (s.includes('좋아요') || s.includes('Like')) likeText = s;
-                    if (s.includes('답글') || s.includes('Reply')) replyText = s;
-                }
-            } catch(e) {}
+            if (!container) return {error: "No container"};
 
-            // 미디어(이미지/영상) 추출
-            let mediaUrls = [];
-            let imgEls = container.querySelectorAll('img');
-            for (let img of imgEls) {
-                if (img.src && !img.src.includes('profile_res') && img.src.startsWith('http')) {
-                    mediaUrls.push(img.src);
+            // 지표 추출 ( aria-label )
+            function getVal(label) {
+                let el = container.querySelector(`[aria-label*="${label}"]`);
+                if (el) {
+                    let span = el.closest('div').querySelector('span');
+                    return span ? span.innerText : "0";
                 }
-            }
-            
-            let videoEls = container.querySelectorAll('video');
-            for (let v of videoEls) {
-                if (v.src && v.src.startsWith('http')) {
-                    mediaUrls.push(v.src);
-                }
+                return "0";
             }
 
-            let mainText = texts.length > 0 ? texts.reduce((a,b) => a.length >= b.length ? a : b) : '';
-            // 페이지 넘김(1/2) 등 제거
-            mainText = mainText.replace(/\\s*\\d+\\s*\\/\\s*\\d+\\s*$/g, '').trim();
+            // 미디어 확보 (썸네일 제외 지능형 필터)
+            let videoEls = Array.from(container.querySelectorAll('video'));
+            let posterUrls = videoEls.map(v => v.getAttribute('poster')).filter(p => p);
+            
+            let allImgs = Array.from(container.querySelectorAll('img')).map(img => img.src);
+            let validImgs = allImgs.filter(src => src && src.includes('scontent') && !posterUrls.includes(src));
+            let validVids = videoEls.map(v => v.src || (v.querySelector('source') ? v.querySelector('source').src : '')).filter(s => s);
+
+            // 본문 텍스트 (dir=auto 중 최장문)
+            let textNodes = Array.from(container.querySelectorAll('[dir="auto"]'));
+            let validTexts = textNodes.map(n => n.innerText.trim()).filter(t => t.length > 5 && !['좋아요','답글','리포스트','공유'].includes(t));
+            let mainText = validTexts.length > 0 ? validTexts.reduce((a,b) => a.length >= b.length ? a : b) : '';
+
+            // 첫 댓글 링크 (Sibling)
+            let firstReplyUrl = (function() {
+                let parent = container.parentElement;
+                let next = parent ? parent.querySelector('a[href*="/post/"]') : null;
+                return (next && next.href !== window.location.href) ? next.href : null;
+            })();
 
             return {
                 text: mainText,
-                likes: likeText,
-                replies: replyText,
-                media: mediaUrls
+                likes: getVal("좋아요") || getVal("Like"),
+                replies: getVal("답글") || getVal("Reply"),
+                reposts: getVal("리포스트") || getVal("Repost"),
+                shares: getVal("보내기") || getVal("Share") || getVal("공유"),
+                media: [...validVids, ...validImgs],
+                createdAt: (container.querySelector('time') || {}).dateTime || "",
+                firstReplyUrl: firstReplyUrl
             };
         }
-        return extractMainPost();
+        return extractResearchData();
         """
         
         res = driver.execute_script(js_code)
         if res and "text" in res:
             data["content_text"] = res["text"]
+            data["created_at"] = res.get("createdAt", "")
+            data["likes"] = parse_metric_to_int(res["likes"])
+            data["replies"] = parse_metric_to_int(res["replies"])
+            data["reposts"] = parse_metric_to_int(res["reposts"])
+            data["shares"] = parse_metric_to_int(res["shares"])
             data["image_urls"] = res.get("media", [])
-            # 기존 parse_metric_to_int 재활용
-            if res.get("likes"): data["likes"] = parse_metric_to_int(res["likes"])
-            if res.get("replies"): data["replies"] = parse_metric_to_int(res["replies"])
-            print(f"    [Scraper] 고립 추출 성공: {len(data['content_text'])}자 / Media: {len(data['image_urls'])}개 / Likes: {data['likes']}")
-        else:
-            # Fallback 1: 활동보기 없이 전역 탐색
-            print(f"    [Scraper] 고립 추출 실패 ({res.get('error') if res else 'None'}), Fallback 탐색 중...")
-            all_spans = driver.find_elements(By.XPATH, "//span[@dir='auto']")
-            valid_texts = [s.text.strip() for s in all_spans if len(s.text.strip()) > 30 and not check_is_profile_link(s)]
-            if valid_texts:
-                data["content_text"] = max(valid_texts, key=len)
-            
-            # 지표 전역 탐색
-            data["likes"] = parse_metric_to_int(get_metric_inside_box(driver, ["좋아요", "Like"]))
-            data["replies"] = parse_metric_to_int(get_metric_inside_box(driver, ["답글", "Reply"]))
+            data["views"] = parse_metric_to_int(get_views_global(driver))
+
+            # --- 4. [비기] 첫댓글 조회수 심층 추적 ---
+            first_reply_url = res.get("firstReplyUrl")
+            if first_reply_url:
+                print(f"    [Research] 첫댓글 발견: {first_reply_url} 탐색 중...")
+                driver.get(first_reply_url)
+                time.sleep(5)
+                data["first_reply_views"] = parse_metric_to_int(get_views_global(driver))
+                print(f"    [Research] 첫댓글 조회수 확보: {data['first_reply_views']}")
 
         return data
     except Exception as e:
@@ -169,25 +179,23 @@ def get_threads_full_data(url):
 
 def calculate_mss_from_metrics(metrics):
     """
-    수집된 지표를 바탕으로 MSS 점수 계산 (댓글조회수^2 / 본문조회수)
-    여기서는 원본 공식 대신 단순화 공식을 사용 중이었으나, 원활한 실험을 위해 
-    일단 좋아요/답글 기준으로 MSS를 계산합니다 (첫댓글조회수는 별도 크롤링이 필요하므로).
+    대표님의 마스터 공식 적용: (첫댓글조회수^2 / 본문조회수)
     """
     if not metrics: return 0.0
     
     views = metrics.get("views", 0)
-    replies = metrics.get("replies", 0)
-    likes = metrics.get("likes", 0)
     first_reply_views = metrics.get("first_reply_views", 0)
     
-    # 대표님의 마스터 공식: (첫댓글조회수^2 / 본문조회수)
     if views > 0 and first_reply_views > 0:
+        # 공식: 첫댓글조회수^2 / 본문조회수
         raw_mss = (first_reply_views ** 2) / views
-        # 0~100 정규화 (최대치 100 기준 임의 스케일)
+        # 0~100 정규화 (10.0은 데이터 분포에 따른 가중치)
         mss = min(raw_mss * 10.0, 100.0)
+        return round(float(mss), 2)
     else:
-        # 백업 공식
-        raw_score = (likes * 1) + (replies * 5)
-        mss = min(raw_score / 10.0, 100.0)
-        
-    return mss
+        # 백업 지표 (좋아요/답글 기반)
+        likes = metrics.get("likes", 0)
+        replies = metrics.get("replies", 0)
+        reposts = metrics.get("reposts", 0)
+        raw_score = (likes * 1) + (replies * 5) + (reposts * 10)
+        return min(raw_score / 15.0, 100.0)

@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, Column, String, Integer, Float, Boolean, Text, ForeignKey, TIMESTAMP, func
+from sqlalchemy import create_engine, Column, String, Integer, Float, Boolean, Text, ForeignKey, TIMESTAMP, func, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import declarative_base, sessionmaker
 from pgvector.sqlalchemy import Vector
@@ -28,10 +28,14 @@ class User(Base):
 # 2. MAB Embeddings Table
 class MABEmbedding(Base):
     __tablename__ = "mab_embeddings"
+    __table_args__ = (
+        UniqueConstraint('content_text', 'embedding_type', name='uq_content_embedding_type'),
+    )
     id = Column(Integer, primary_key=True, autoincrement=True)
     uploader_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     is_global = Column(Boolean, default=False)
     content_text = Column(Text, nullable=False)
+    embedding_type = Column(String(10), nullable=False, default="multi")  # text / visual / multi
     embedding = Column(Vector(3072)) # Gemini embedding-001 dimension
     mss_score = Column(Float, default=0.0)
     metadata_json = Column(JSONB, default={}) # source type, original url, etc.

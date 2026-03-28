@@ -1,8 +1,13 @@
 import os
-from sqlalchemy import create_engine, Column, String, Integer, Float, Boolean, Text, ForeignKey, TIMESTAMP, func, text as sql_text
+from sqlalchemy import create_engine, Column, String, Integer, Float, Boolean, Text, ForeignKey, TIMESTAMP, func, text as sql_text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
-from pgvector.sqlalchemy import Vector
+try:
+    from pgvector.sqlalchemy import Vector
+    HAS_PGVECTOR = True
+except ImportError:
+    HAS_PGVECTOR = False
+    from sqlalchemy import Text as Vector # Fallback for local automation
 from dotenv import load_dotenv
 import uuid
 
@@ -34,11 +39,16 @@ class User(Base):
 
 class MABEmbedding(Base):
     __tablename__ = "mab_embeddings"
+    __table_args__ = (
+        UniqueConstraint('content_text', 'embedding_type', name='uq_content_embedding_type'),
+    )
     id = Column(Integer, primary_key=True, autoincrement=True)
     uploader_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     is_global = Column(Boolean, default=False)
     content_text = Column(Text, nullable=False)
-    embedding = Column(Vector(3072)) 
+    embedding_type = Column(String(10), nullable=False, default="multi")  # text / visual / multi
+    # pgvector가 없는 환경(로컬 SQLite 등)에서는 Vector 대신 Text/JSON 등으로 폴백
+    embedding = Column(Vector(3072)) if HAS_PGVECTOR else Column(Text)
     mss_score = Column(Float, default=0.0)
     metadata_json = Column(JSONB, default=dict)
 
