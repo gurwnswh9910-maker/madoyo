@@ -31,8 +31,9 @@ class ContrastivePrompter:
         },
     ]
     
-    def __init__(self, embedding_manager=None):
+    def __init__(self, embedding_manager=None, all_data=None):
         self.emb_mgr = embedding_manager
+        self.all_data = all_data
     
     def _build_static_context(self):
         lines = ["[대조 학습 예시 — 비슷한 글인데 성과가 극단적으로 다른 쌍]"]
@@ -66,18 +67,46 @@ class ContrastivePrompter:
 
     def _find_dynamic_contrastive_pair(self, high_post_text, high_mss):
         """고성과 게시물과 유사도가 가장 높으면서 성과가 낮은 게시물을 DB에서 검색"""
-        if self.emb_mgr is None or high_post_text is None:
-            return None, None
+        # 1. 로컬 데이터(self.all_data)가 있는 경우 우선 사용
+        if self.all_data is not None and not self.all_data.empty:
+            try:
+                high_vec = self.emb_mgr.get_text_embedding(high_post_text)
+                if high_vec is None: return None, None
+                
+                # MSS가 threshold 이하인 데이터들 중 유사도가 높은 것 찾기
+                low_mss_threshold = high_mss * 0.7
+                candidates = self.all_data[self.all_data['MSS'] <= low_mss_threshold].copy()
+                if candidates.empty: return None, None
+                
+                # 유사도 계산 (메모리 내 벡터 연산)
+                # Note: 실제 서비스에서는 이 부분이 성능 최적화가 필요할 수 있으나, 100~200개 규모에서는 충분히 빠름
+                best_text, best_mss, max_sim = None, None, -1.0
+                for _, row in candidates.iterrows():
+                    if row['본문'] == high_post_text: continue
+                    c_vec = self.emb_mgr.get_text_embedding(row['본문'])
+                    if c_vec is None: continue
+                    
+                    sim = np.dot(high_vec, c_vec) / (np.linalg.norm(high_vec) * np.linalg.norm(c_vec) + 1e-10)
+                    if sim > max_sim:
+                        max_sim = sim
+                        best_text = row['본문']
+                        best_mss = row['MSS']
+                
+                if max_sim > 0.6:
+                    return best_text, best_mss
+                return None, None
+            except Exception as e:
+                print(f"Error finding local contrastive pair: {e}")
+                # 로컬 실패 시 DB 시도로 폴백
 
-        input_emb = self.emb_mgr.get_text_embedding(high_post_text)
-        if input_emb is None:
-            return None, None
-
-        vec_str = "[" + ",".join(map(str, input_emb)) + "]"
-        low_mss_threshold = high_mss * 0.7
-        
+        # 2. DB 검색 (Legacy/Fallback)
         db: Session = SessionLocal()
         try:
+            input_emb = self.emb_mgr.get_text_embedding(high_post_text)
+            if input_emb is None: return None, None
+            vec_str = "[" + ",".join(map(str, input_emb)) + "]"
+            low_mss_threshold = high_mss * 0.7
+            
             # SQL: 유사도 순으로 정렬하되 MSS가 일정 수준 이하인 것 1개 검색
             query = sql_text("""
                 SELECT content_text, mss_score, (1 - (embedding <=> :vec)) as sim
@@ -93,7 +122,7 @@ class ContrastivePrompter:
             return None, None
             
         except Exception as e:
-            print(f"Error finding contrastive pair: {e}")
+            print(f"Error finding DB contrastive pair: {e}")
             return None, None
         finally:
             db.close()
