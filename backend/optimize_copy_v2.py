@@ -155,7 +155,7 @@ def extract_dynamic_all(client, model, product_info, pairs, static_strats=None):
 
 def run_optimization(original_copy: str, product_focus, input_image_urls: list = None,
                        api_key: str = None, model_name: str = None, base_path: str = None,
-                       shared_resources: dict = None):
+                       shared_resources: dict = None, user_id: str = None):
     # ═══ google.genai Client 방식 (최신 API) ═══
     import concurrent.futures
     from google import genai
