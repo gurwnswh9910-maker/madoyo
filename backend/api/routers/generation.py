@@ -192,8 +192,9 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
                             "reason": res.get("score_data", {}).get("reason", "")
                         })
                     
-                    # DB 업데이트
-                    gen_record = _db.query(Generation).filter(Generation.id == uuid_pkg.UUID(t_id)).first()
+                    # DB 업데이트 (UUID 변환 최적화)
+                    task_uuid = uuid_pkg.UUID(t_id)
+                    gen_record = _db.query(Generation).filter(Generation.id == task_uuid).first()
                     if gen_record:
                         gen_record.status = "completed"
                         gen_record.results = {"copies": formatted_copies}
@@ -202,7 +203,8 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
                     import traceback
                     print(traceback.format_exc())
                     # 에러 상태 기록
-                    gen_record = _db.query(Generation).filter(Generation.id == uuid_pkg.UUID(t_id)).first()
+                    task_uuid = uuid_pkg.UUID(t_id)
+                    gen_record = _db.query(Generation).filter(Generation.id == task_uuid).first()
                     if gen_record:
                         gen_record.status = "error"
                         gen_record.results = {"error": str(e)}

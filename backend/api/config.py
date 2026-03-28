@@ -6,9 +6,12 @@ API 요청에서 동적으로 받도록 전환합니다.
 import os
 from dotenv import load_dotenv
 
-# .env 파일 로드 (프로젝트 루트 또는 자동화 폴더)
-# 여러 경로에서 .env를 탐색
-_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# .env 파일 로드 (프로젝트 루트 탐색 로직 고도화)
+from pathlib import Path
+_current_file = Path(__file__).resolve()
+# api/config.py -> api/ -> backend/ -> . (root)
+_project_root = str(_current_file.parent.parent.parent)
+
 env_path = os.path.join(_project_root, ".env")
 if os.path.exists(env_path):
     load_dotenv(env_path)

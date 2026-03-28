@@ -26,13 +26,18 @@ async def upload_media(file: UploadFile = File(...)):
     if ext not in allowed_exts:
         raise HTTPException(status_code=400, detail=f"지원하지 않는 파일 형식입니다: {ext}")
 
-    # 파일 크기 검증
-    contents = await file.read()
-    if len(contents) > MAX_FILE_SIZE:
+    # 파일 크기 검증 (메모리 절약을 위해 read() 전 seek/tell 사용)
+    await file.seek(0, 2)  # 파일 끝으로 이동
+    size = await file.tell()
+    await file.seek(0)      # 다시 시작으로 복구
+    
+    if size > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=413,
-            detail=f"파일 크기가 {MEDIA_MAX_SIZE_MB}MB를 초과합니다. ({len(contents) // (1024*1024)}MB)"
+            detail=f"파일 크기가 {MEDIA_MAX_SIZE_MB}MB를 초과합니다. ({size // (1024*1024)}MB)"
         )
+    
+    contents = await file.read()
         
     file_id = str(uuid.uuid4())
     filename = f"{file_id}{ext}"
