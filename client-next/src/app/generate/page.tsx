@@ -3,7 +3,8 @@ import { useState, useRef, useEffect, Suspense } from "react";
 import { apiGet, apiPost, pollTask } from "@/lib/api";
 import { showToast } from "@/components/layout/Toast";
 import { reportBug } from "@/lib/api";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth-context";
 
 interface CopyResult {
   rank: number;
@@ -36,6 +37,8 @@ function GenerateContent() {
   const [publishUrl, setPublishUrl] = useState("");
   const [showPublishBanner, setShowPublishBanner] = useState(false);
   const [genId, setGenId] = useState<string | null>(null);
+  const { user, refreshUser } = useAuth();
+  const router = useRouter();
 
   // ID가 있을 경우 기존 데이터 로드
   useEffect(() => {
@@ -93,6 +96,18 @@ function GenerateContent() {
   };
 
   const generateCopy = async () => {
+    // [MVP V7] 로그인 체크
+    if (!user) {
+      showToast("로그인이 필요한 기능입니다. 로그인 페이지로 이동합니다.");
+      router.push("/login");
+      return;
+    }
+
+    if (user.credits < 1) {
+        showToast("크레딧이 부족합니다. 무료 충전소 등을 이용해 주세요.", "error");
+        return;
+    }
+
     setIsGenerating(true);
     setResults([]);
     const interval = startLoadingAnimation();
@@ -143,6 +158,8 @@ function GenerateContent() {
     } finally {
       clearInterval(interval);
       setIsGenerating(false);
+      // [MVP V7] 사용 후 크레딧 잔액 갱신
+      refreshUser();
     }
   };
 
@@ -336,6 +353,11 @@ function GenerateContent() {
                 style={{ paddingLeft: '3rem' }}
                 placeholder="가져올 게시물 URL 입력 (선택)"
               />
+              {refUrl && (
+                <p className="text-[10px] text-amber-400/80 mt-1 ml-2">
+                  ⚠️ URL 자동 분석은 점검 중입니다. 텍스트를 직접 입력하시면 더 정확한 결과가 나옵니다.
+                </p>
+              )}
             </div>
           </div>
 

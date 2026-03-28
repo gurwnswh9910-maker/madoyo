@@ -62,20 +62,29 @@ def health_check():
 # ════════════════════════════════════════════════════════════════
 
 @router.post("/generate", response_model=TaskResponse)
-def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks):
+def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, current_user=Depends(get_current_user)):
     """
     카피 생성 요청 접수 (비동기).
     
+    [MVP V7] 로그인 및 크레딧(1차감) 필수.
     입력: 참고 카피 / 이미지 URL / 레퍼런스 URL 중 최소 1개
     출력: task_id (결과 조회를 위해 필요)
     """
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY가 설정되지 않았습니다.")
     
-    from api.database import SessionLocal, Generation
+    from api.database import SessionLocal, Generation, User
     db = SessionLocal()
     
     try:
+        # [MVP V7] 크레딧 체크 및 차감
+        user = db.query(User).filter(User.id == current_user.id).first()
+        if not user or user.credits < 1:
+            raise HTTPException(status_code=403, detail="크레딧이 부족합니다. (필요: 1)")
+        
+        user.credits -= 1
+        db.commit()
+
         # Step 1: 비동기 태스크 호출 (스크래핑/분석 포함)
         if USE_CELERY:
             from api.worker import optimize_copy_task
@@ -134,16 +143,30 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks):
                     from optimize_copy_v2 import run_optimization as run_optimized_engine
                 
                 try:
-                    # ── 배경에서 컨텍스트 빌딩 (스크래핑 등) 수행 ──
+                    # [MVP V7] Selenium(Chrome) 임시 비활성화하여 512MB RAM OOM 방지
+                    # reference_url이 있어도 스크래핑을 건너뛰고 텍스트/이미지만으로 분석합니다.
+                    product_focus = None
+                    original_copy = req.reference_copy or ""
+
+                    if req.reference_url:
+                        print(f"[MVP V7] URL Scraping Bypassed: {req.reference_url}")
+                        # URL 정보는 나중에 로컬에서 처리할 수 있도록 로그로 남기고 기본 컨텍스트 구성
+                        if not original_copy:
+                            original_copy = "URL 분석 대기 중 (텍스트를 입력해 주세요)"
+
+                    # 이미지 분석은 Chrome을 쓰지 않으므로 정상 유지
                     from api.services.context_builder import build_context
-                    product_focus, original_copy = build_context(
+                    product_focus, build_copy = build_context(
                         api_key=api_key,
                         model_name=m_name,
                         reference_copy=req.reference_copy,
                         image_urls=req.image_urls,
-                        reference_url=req.reference_url,
+                        reference_url=None, # URL 스크래핑 건너뜀
                         appeal_point=req.appeal_point,
                     )
+                    
+                    if build_copy:
+                        original_copy = build_copy
 
                     # original_copy 보정
                     if not original_copy or not original_copy.strip():
@@ -193,7 +216,7 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks):
                 req=request,
                 api_key=GEMINI_API_KEY,
                 m_name=MODEL_NAME,
-                u_id=None
+                u_id=str(current_user.id)
             )
             return TaskResponse(task_id=task_id, status="PENDING")
 
@@ -367,14 +390,23 @@ def submit_feedback_url(gen_id: str, req: SubmitUrlRequest):
             db.add(feedback)
 
         feedback.published_url = req.url
-        feedback.status = "pending"
-        # ✅ Celery 없이 DB에 예약 시각 저장 (24시간 뒤)
-        feedback.scheduled_at = datetime.utcnow() + timedelta(seconds=REWARD_COUNTDOWN_SEC)
+        feedback.status = "completed" # [MVP V7] 즉시 완료 처리
+        feedback.scheduled_at = datetime.utcnow()
+        feedback.reward_credits = 2
+        
+        # [MVP V7] 즉시 크레딧 지급
+        from api.database import User, Generation
+        gen = db.query(Generation).filter(Generation.id == gen_id).first()
+        if gen and gen.user_id:
+            user = db.query(User).filter(User.id == gen.user_id).first()
+            if user:
+                user.credits += 2
+        
         db.commit()
 
         return {
             "status": "success",
-            "message": "접수 완료! 24시간 후 검증을 거쳐 크레딧이 지급됩니다.",
+            "message": "즉시 보상 완료! 2 크레딧이 지급되었습니다.",
             "scheduled_at": feedback.scheduled_at.isoformat()
         }
     finally:
