@@ -50,7 +50,7 @@ def get_threads_full_data(url):
     # Render Docker 환경 기준 경로 (자동 설치된 google-chrome)
     chrome_bin = os.environ.get("CHROME_BIN", "/usr/bin/google-chrome")
     
-    # [극한의 512MB RAM 생존용 Chrome 최적화 옵션]
+    # [극한의 512MB RAM 생존용 Chrome 최적화 옵션 (이미지 분석 로직 유지)]
     extra_args = [
         "--no-sandbox", 
         "--disable-dev-shm-usage", 
@@ -62,8 +62,7 @@ def get_threads_full_data(url):
         "--disable-client-side-phishing-detection",
         "--disable-default-apps",
         "--disable-extensions",
-        "--mute-audio",
-        "--blink-settings=imagesEnabled=false" # 이미지 로드 제한 (속도/메모리 확보)
+        "--mute-audio"
     ]
     
     driver = Driver(
