@@ -69,29 +69,14 @@ async def generate_copy(request: GenerateRequest, background_tasks: BackgroundTa
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY가 설정되지 않았습니다.")
     
     try:
-        # Step 1: 입력 → product_focus 변환 (이 과정은 가벼우므로 동기 처리 유지)
-        product_focus, original_copy = build_context(
-            api_key=GEMINI_API_KEY,
-            model_name=MODEL_NAME,
-            reference_copy=request.reference_copy,
-            image_urls=request.image_urls,
-            reference_url=request.reference_url,
-            appeal_point=request.appeal_point,
-        )
-
-        # original_copy 보정
-        if not original_copy or not original_copy.strip():
-            if isinstance(product_focus, dict):
-                original_copy = product_focus.get("marketing_insight", "제품 홍보 카피")
-            else:
-                original_copy = str(product_focus)
-
-        # Step 2: 비동기 태스크 호출
+        # Step 1: 비동기 태스크 호출 (스크래핑/분석 포함)
         if USE_CELERY:
             from api.worker import optimize_copy_task
             task = optimize_copy_task.delay(
-                original_copy=original_copy,
-                product_focus=product_focus,
+                reference_copy=request.reference_copy,
+                image_urls=request.image_urls,
+                reference_url=request.reference_url,
+                appeal_point=request.appeal_point,
                 api_key=GEMINI_API_KEY,
                 model_name=MODEL_NAME,
                 user_id=None # 현재는 단일 유저
@@ -104,7 +89,7 @@ async def generate_copy(request: GenerateRequest, background_tasks: BackgroundTa
             LOCAL_TASKS[task_id] = {"status": "PENDING"}
             IS_ONLINE = os.getenv("IS_ONLINE", "False").lower() == "true"
             
-            def run_local_task(t_id, copy_text, focus_text, api_key, m_name, u_id):
+            def run_local_task(t_id, req, api_key, m_name, u_id):
                 if IS_ONLINE:
                     from optimize_copy_online import run_optimization_online as run_optimized_engine
                 else:
@@ -112,9 +97,28 @@ async def generate_copy(request: GenerateRequest, background_tasks: BackgroundTa
                 
                 try:
                     LOCAL_TASKS[t_id]["status"] = "PROGRESS"
+                    
+                    # ── 배경에서 컨텍스트 빌딩 (스크래핑 등) 수행 ──
+                    from api.services.context_builder import build_context
+                    product_focus, original_copy = build_context(
+                        api_key=api_key,
+                        model_name=m_name,
+                        reference_copy=req.reference_copy,
+                        image_urls=req.image_urls,
+                        reference_url=req.reference_url,
+                        appeal_point=req.appeal_point,
+                    )
+
+                    # original_copy 보정
+                    if not original_copy or not original_copy.strip():
+                        if isinstance(product_focus, dict):
+                            original_copy = product_focus.get("marketing_insight", "제품 홍보 카피")
+                        else:
+                            original_copy = str(product_focus)
+
                     results = run_optimized_engine(
-                        original_copy=copy_text,
-                        product_focus=focus_text,
+                        original_copy=original_copy,
+                        product_focus=product_focus,
                         api_key=api_key,
                         model_name=m_name,
                         user_id=u_id
@@ -137,8 +141,7 @@ async def generate_copy(request: GenerateRequest, background_tasks: BackgroundTa
             background_tasks.add_task(
                 run_local_task,
                 t_id=task_id,
-                copy_text=original_copy,
-                focus_text=product_focus,
+                req=request,
                 api_key=GEMINI_API_KEY,
                 m_name=MODEL_NAME,
                 u_id=None

@@ -33,17 +33,36 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 @celery_app.task(name="optimize_copy_task", bind=True)
-def optimize_copy_task(self, original_copy, product_focus, api_key=None, model_name=None, user_id=None):
+def optimize_copy_task(self, reference_copy=None, image_urls=None, reference_url=None, appeal_point=None, api_key=None, model_name=None, user_id=None):
     """
-    카피 생성 최적화 작업을 수행하는 비동기 태스크
+    카피 생성 최적화 작업을 수행하는 비동기 태스크 (스크래핑 포함)
     """
     from optimize_copy_v2 import run_optimization
+    from api.services.context_builder import build_context
     
-    # 작업 상태 업데이트 (시작 알림)
-    self.update_state(state="PROGRESS", meta={"status": "분석 및 전략 추출 시작..."})
+    # 작업 상태 업데이트 (컨텍스트 빌딩 시작)
+    self.update_state(state="PROGRESS", meta={"status": "입력 분석 및 스크래핑 시작..."})
     
     try:
+        # ── 배경에서 컨텍스트 빌딩 (스크래핑 등) 수행 ──
+        product_focus, original_copy = build_context(
+            api_key=api_key,
+            model_name=model_name,
+            reference_copy=reference_copy,
+            image_urls=image_urls,
+            reference_url=reference_url,
+            appeal_point=appeal_point,
+        )
+
+        # original_copy 보정
+        if not original_copy or not original_copy.strip():
+            if isinstance(product_focus, dict):
+                original_copy = product_focus.get("marketing_insight", "제품 홍보 카피")
+            else:
+                original_copy = str(product_focus)
+
         # 실제 최적화 엔진 실행
+        self.update_state(state="PROGRESS", meta={"status": "카피 최적화 생성 중..."})
         results = run_optimization(
             original_copy=original_copy,
             product_focus=product_focus,
