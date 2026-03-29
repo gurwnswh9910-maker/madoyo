@@ -2,6 +2,8 @@ import joblib
 import numpy as np
 import os
 import gc
+import re
+from datetime import datetime
 from typing import List, Dict
 from app_config import GlobalConfig
 
@@ -29,19 +31,59 @@ class CopyScorerV5:
         self.tour_model = joblib.load(self.files['tour'])
         print("✅ 98% 정확도 판독 모델 3종 로드 완료.")
         
-    def score_candidates(self, candidates_embeddings: List[np.ndarray], orig_index: int = None) -> List[Dict]:
-        """기존 CopyScorerV4의 98% 정확도 채점 로직 이식"""
-        if not candidates_embeddings or len(candidates_embeddings) == 0:
+    def _extract_meta_features(self, text: str, dt: datetime = None) -> np.ndarray:
+        """
+        젬미니 임베딩(3072) 뒤에 붙을 9개의 메타 피처 생성:
+        [day_sin, day_cos, hour_sin, hour_cos, emoji, line, q, ex, text_len]
+        """
+        if dt is None:
+            dt = datetime.now()
+            
+        # 1. Cyclic Time (4)
+        day_sin = np.sin(2 * np.pi * dt.dayofweek / 7)
+        day_cos = np.cos(2 * np.pi * dt.dayofweek / 7)
+        hour_sin = np.sin(2 * np.pi * dt.hour / 24)
+        hour_cos = np.cos(2 * np.pi * dt.hour / 24)
+        
+        # 2. Style (4)
+        if not isinstance(text, str): 
+            style = [0, 0, 0, 0]
+            t_len = 0
+        else:
+            emoji_count = len(re.findall(r'[^\w\s,]', text))
+            line_count = text.count('\n')
+            q_count = text.count('?')
+            ex_count = text.count('!')
+            style = [emoji_count, line_count, q_count, ex_count]
+            t_len = len(text)
+            
+        return np.array([day_sin, day_cos, hour_sin, hour_cos] + style + [t_len])
+
+    def score_candidates(self, candidates_data: List[Dict], orig_index: int = None) -> List[Dict]:
+        """
+        candidates_data: [{'text': str, 'embedding': np.ndarray}, ...]
+        Gemini 임베딩(3072) + 메타 피처(9) = 3081차원으로 확장하여 채점.
+        """
+        if not candidates_data or len(candidates_data) == 0:
             return []
+
+        # 현재 시간 (메타 피처용)
+        now = datetime.now()
 
         processed_vecs = []
         valid_mask = []
-        for vec in candidates_embeddings:
+        for item in candidates_data:
+            text = item.get('text', '')
+            vec = item.get('embedding')
+            
             if vec is None or np.any(np.isnan(vec)) or np.all(vec == 0):
-                processed_vecs.append(np.zeros(3072))
+                processed_vecs.append(np.zeros(3081))
                 valid_mask.append(False)
             else:
-                processed_vecs.append(np.array(vec))
+                # 3072 + 9 = 3081
+                meta = self._extract_meta_features(text, now)
+                full_vec = np.hstack([vec, meta])
+                processed_vecs.append(full_vec)
                 valid_mask.append(True)
         
         X = np.array(processed_vecs)

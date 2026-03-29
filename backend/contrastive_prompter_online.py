@@ -63,10 +63,10 @@ class ContrastivePrompter:
         db: Session = SessionLocal()
         try:
             query = sql_text("""
-                SELECT content_text, mss_score, (1 - (embedding <=> :vec::vector)) as sim
+                SELECT content_text, mss_score, (1 - (embedding <=> CAST(:vec AS vector))) as sim
                 FROM mab_embeddings
                 WHERE mss_score <= :mss_limit AND content_text != :orig AND embedding_type IN ('text', 'multi')
-                ORDER BY (embedding <=> :vec::vector) ASC
+                ORDER BY (embedding <=> CAST(:vec AS vector)) ASC
                 LIMIT 1
             """)
             result = db.execute(query, {"vec": input_emb.tolist(), "mss_limit": low_mss_threshold, "orig": high_post_text}).first()

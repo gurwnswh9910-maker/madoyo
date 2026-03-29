@@ -327,11 +327,11 @@ def run_optimization_online(
     # ══════════════════════════════════════════════════════════════
     print(f"\n4. [V5 엔진] 생성된 {len(scored)}개 카피 전원 ML 리그전 채점 중...")
     
-    candidates_embeddings = [c["embedding"] for c in scored]
+    candidates_data = [{"text": c["copy"], "embedding": c["embedding"]} for c in scored]
     orig_idx = next((i for i, c in enumerate(scored) if c["cid"] == "Original"), 0)
     
     try:
-        scoring_results = scorer.score_candidates(candidates_embeddings, orig_index=orig_idx)
+        scoring_results = scorer.score_candidates(candidates_data, orig_index=orig_idx)
     except Exception as e:
         print(f"    ⚠️ 채점 실패. 에러: {e}")
         scoring_results = []
