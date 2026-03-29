@@ -24,6 +24,3 @@ google-generativeai
 sentence-transformers
 opencv-python-headless
 seleniumbase
-lightgbm
-joblib
-scipy

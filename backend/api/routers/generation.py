@@ -130,17 +130,14 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
             db.refresh(gen)
             task_id = str(gen.id)
 
-            IS_ONLINE = os.getenv("IS_ONLINE", "False").lower() == "true"
-            
+            # 대표님 지침에 따라 로컬 테스트(오프라인 모드)를 완전히 제거하고 무조건 Supabase 모드 사용
             def run_local_task(t_id, req, api_key, m_name, u_id):
                 from api.database import SessionLocal, Generation
                 import uuid as uuid_pkg
                 _db = SessionLocal()
                 
-                if IS_ONLINE:
-                    from optimize_copy_online import run_optimization_online as run_optimized_engine
-                else:
-                    from optimize_copy_v2 import run_optimization as run_optimized_engine
+                print("🚀 [클라우드 전용 아키텍처] 무조건 Supabase DB 네이티브 가동 (optimize_copy_online)")
+                from optimize_copy_online import run_optimization_online as run_optimized_engine
                 
                 try:
                     # [MVP V7] Selenium(Chrome) 임시 비활성화하여 512MB RAM OOM 방지
