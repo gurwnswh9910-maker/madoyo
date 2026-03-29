@@ -15,7 +15,7 @@ from google import genai
 from embedding_utils_online import EmbeddingManager
 from contrastive_prompter_online import ContrastivePrompter
 from copy_generator_v2 import DynamicCopyGenerator
-from copy_scorer_v3 import CopyScorer
+from copy_scorer_v5_online import CopyScorerV5
 from api.config import STATIC_STRATEGIES
 
 
@@ -175,8 +175,8 @@ def run_optimization_online(
     
     scorer = shared_resources.get('scorer')
     if not scorer:
-        scorer = CopyScorer(embedding_manager=emb_mgr)
-        scorer.prepare_reference_vectors(product_focus)
+        # 512MB 램 제한을 위해 내부 GC 통제 버전
+        scorer = CopyScorerV5()
         shared_resources['scorer'] = scorer
     
     # ══════════════════════════════════════════════════════════════
@@ -217,20 +217,15 @@ def run_optimization_online(
     # ══════════════════════════════════════════════════════════════
     print(f"\n3. 전략 추출 및 카피 생성 시작...")
     
-    # 원본 채점
+    # 원본 수집 준비
     orig_vec = query_vec if query_vec is not None else np.zeros(3072)
-    orig_score_data = scorer.score_batch(
-        [{"id": "Original", "copy": original_copy, "embedding": orig_vec}],
-        product_focus
-    )[0]
     
     scored = [{
         "success": True,
         "cid": "Original",
         "copy": original_copy,
         "strategy": "원본",
-        "score_data": orig_score_data["score_data"],
-        "total_score": orig_score_data["score_data"].get("mss_score_estimate", 0)
+        "embedding": orig_vec
     }]
     
     # 대조쌍 추출 (SQL 기반)
@@ -312,23 +307,15 @@ def run_optimization_online(
                                 print(f"    ⚠️  [{res['cid']}] 임베딩 실패. 스킵.")
                                 continue
                             
-                            ai_results = scorer.score_batch(
-                                [{"id": res["cid"], "copy": t_copy, "embedding": c_vec}],
-                                product_focus
-                            )
-                            ai_res = ai_results[0]
-                            
                             c_suffix = "_A" if i == 0 else "_B"
                             item = {
                                 "cid": res["cid"] + c_suffix,
                                 "copy": t_copy,
                                 "strategy": res["strategy"],
-                                "score_data": ai_res["score_data"],
-                                "total_score": ai_res["score_data"].get("mss_score_estimate", 0)
+                                "embedding": c_vec
                             }
                             scored.append(item)
-                            
-                            print(f"   ✅ [{res['cid']+c_suffix:>8}] {item['total_score']:>5} | {t_copy[:30]}...")
+                            print(f"   ✅ [{res['cid']+c_suffix:>8}] 후보군 추가 완료 | {t_copy[:30]}...")
                     else:
                         print(f"   ❌ [{res['cid']}] 생성 실패: {res.get('error', 'unknown')}")
             
@@ -336,12 +323,34 @@ def run_optimization_online(
                 break
     
     # ══════════════════════════════════════════════════════════════
-    # 4. 최종 랭킹 및 결과 반환
+    # 4. [V16] 98% 정확도 ML 리그전 통합 채점
     # ══════════════════════════════════════════════════════════════
-    scored = sorted(scored, key=lambda x: x['total_score'], reverse=True)
+    print(f"\n4. [V5 엔진] 생성된 {len(scored)}개 카피 전원 ML 리그전 채점 중...")
+    
+    candidates_embeddings = [c["embedding"] for c in scored]
+    orig_idx = next((i for i, c in enumerate(scored) if c["cid"] == "Original"), 0)
+    
+    try:
+        scoring_results = scorer.score_candidates(candidates_embeddings, orig_index=orig_idx)
+    except Exception as e:
+        print(f"    ⚠️ 채점 실패. 에러: {e}")
+        scoring_results = []
+    
+    for rank_meta in scoring_results:
+        idx = rank_meta['index']
+        scored[idx]["total_score"] = rank_meta['total_score']
+        scored[idx]["score_data"] = {
+            "mss_score_estimate": rank_meta['total_score'],
+            "reg_score": rank_meta['reg_score'],
+            "hurdle_prob": rank_meta['hurdle_prob'],
+            "pass_hurdle": rank_meta['pass_hurdle'],
+            "league_wins": rank_meta['league_wins']
+        }
+        
+    scored = sorted(scored, key=lambda x: x.get('total_score', 0), reverse=True)
     
     orig_rank = next((i+1 for i, item in enumerate(scored) if item['cid'] == 'Original'), -1)
-    print(f"\n📊 [성과 벤치마크] 원본 순위: {orig_rank}위 / {len(scored)}개 중")
+    print(f"\n📊 [성과 벤치마크] ML 원본 순위: {orig_rank}위 / {len(scored)}개 중")
     print(f"🏁 최적화 완료! (총 {len(scored)}개 분석, 소요시간: {time.time()-t_start:.1f}초)")
     
-    return scored[:3]
+    return [s for s in scored if 'score_data' in s][:3]

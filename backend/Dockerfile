@@ -2,10 +2,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 필수 기본 라이브러리 및 DB(PostgreSQL) 연결을 위한 라이브러리 설치
+# 필수 기본 라이브러리 및 DB(PostgreSQL), ML(lightgbm) 모델용 시스템 라이브러리 설치
 RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # 의존성 파일 복사 및 설치
