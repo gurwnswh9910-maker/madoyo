@@ -89,7 +89,9 @@ class ContrastivePrompter:
             if best_low_text:
                 lines = ["\n[동적 대조 학습 예시 — 현재 모델이 발견한 텍스트 유사도 기반 쌍]"]
                 lines.append("아래 LOW→HIGH 차이를 분석하고, HIGH의 패턴을 파악하세요.\n")
-                lines.append(f"❌ LOW (MSS {best_low_mss:.0f}): {best_low_text.replace('\n', ' / ')}")
-                lines.append(f"✅ HIGH (MSS {high_mss:.0f}): {high_post_text.replace('\n', ' / ')}")
+                best_low_preview = best_low_text.replace('\n', ' / ')
+                high_preview = high_post_text.replace('\n', ' / ')
+                lines.append(f"❌ LOW (MSS {best_low_mss:.0f}): {best_low_preview}")
+                lines.append(f"✅ HIGH (MSS {high_mss:.0f}): {high_preview}")
                 parts.append("\n".join(lines))
         return "\n".join(parts), best_low_text, best_low_mss
