@@ -5,10 +5,9 @@ from typing import List, Dict
 from app_config import GlobalConfig
 
 # 모델 경로 (GlobalConfig 기반)
-_MODEL_DIR = GlobalConfig.BASE_DIR / 'embedding_migration'
-REG_PATH = _MODEL_DIR / 'viral_model.pkl'
-TOUR_PATH = _MODEL_DIR / 'tournament_model.pkl'
-HURDLE_PATH = _MODEL_DIR / 'hurdle_model.pkl'
+REG_PATH = GlobalConfig.MODEL_DIR / 'viral_model.pkl'
+TOUR_PATH = GlobalConfig.MODEL_DIR / 'tournament_model.pkl'
+HURDLE_PATH = GlobalConfig.MODEL_DIR / 'hurdle_model.pkl'
 
 class CopyScorerV4:
     def __init__(self):

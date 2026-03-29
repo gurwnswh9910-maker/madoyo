@@ -2,8 +2,13 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# .env 파일 로드 (현재 backend 폴더 기준)
-BASE_DIR = Path(__file__).resolve().parent
+# .env 파일 로드 및 경로 설정
+# 프로덕션(Render) 환경일 경우 /app/backend 고정, 아닐 경우 동적 산출
+if os.getenv("RENDER"):
+    BASE_DIR = Path("/app/backend")
+else:
+    BASE_DIR = Path(__file__).resolve().parent
+
 env_path = BASE_DIR / '.env'
 # 만약 backend/.env가 없으면 상위 폴더(루트) 체크
 if not env_path.exists():
