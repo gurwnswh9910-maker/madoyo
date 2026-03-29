@@ -16,9 +16,6 @@ export default function Navbar() {
         <Link href="/generate" className="text-gray-400 hover:text-white transition-colors flex items-center gap-1.5 whitespace-nowrap text-sm md:text-base">
           📝 카피 생성
         </Link>
-        <Link href="/upload" className="text-gray-400 hover:text-white transition-colors flex items-center gap-1.5 whitespace-nowrap text-sm md:text-base">
-          📤 업로드
-        </Link>
 
         {user ? (
           <div className="flex items-center gap-4">

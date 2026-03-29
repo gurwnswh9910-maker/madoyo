@@ -472,18 +472,27 @@ def submit_feedback_url(gen_id: str, req: SubmitUrlRequest):
     if not re.match(r'^https?://(www\.)?threads\.net/.*', req.url):
         raise HTTPException(status_code=400, detail="유효한 Threads URL이 아닙니다.")
 
+    normalized_url = req.url.strip()
+
     db = SessionLocal()
     try:
-        existing = db.query(MABFeedback).filter(MABFeedback.published_url == req.url).first()
+        existing = db.query(MABFeedback).filter(MABFeedback.published_url == normalized_url).first()
         if existing:
             raise HTTPException(status_code=400, detail="이미 보상이 신청된 URL입니다.")
 
         feedback = db.query(MABFeedback).filter(MABFeedback.gen_id == gen_id).first()
-        if not feedback:
+        if feedback:
+            if feedback.reward_credits and feedback.reward_credits > 0:
+                raise HTTPException(status_code=400, detail="이미 보상이 지급된 생성건입니다.")
+            if feedback.status in {"pending", "processing", "staged", "completed"}:
+                raise HTTPException(status_code=400, detail="이미 보상이 신청된 생성건입니다.")
+            if feedback.published_url:
+                raise HTTPException(status_code=400, detail="이미 URL이 제출된 생성건입니다.")
+        else:
             feedback = MABFeedback(gen_id=gen_id)
             db.add(feedback)
 
-        feedback.published_url = req.url
+        feedback.published_url = normalized_url
         feedback.status = "completed" # [MVP V7] 즉시 완료 처리
         feedback.scheduled_at = datetime.utcnow()
         feedback.reward_credits = 2

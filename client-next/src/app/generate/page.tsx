@@ -9,6 +9,8 @@ import { useAuth } from "@/lib/auth-context";
 interface CopyResult {
   rank: number;
   copy_text: string;
+  original_copy_text: string;
+  version_history: string[];
   strategy: string;
   score: number;
   showRefine: boolean;
@@ -106,6 +108,8 @@ function GenerateContent() {
         setResults(
           response.copies.map((c: CopyResult) => ({
             ...c,
+            original_copy_text: c.copy_text,
+            version_history: [c.copy_text],
             showRefine: false,
             chatHistory: [{ role: "assistant", content: "무엇을 어떻게 수정할까요?" }],
             refineInput: "",
@@ -177,6 +181,10 @@ function GenerateContent() {
   const sendRefine = async (index: number) => {
     const item = results[index];
     if (!item.refineInput.trim() || item.isRefining) return;
+    if (!genId) {
+      showToast("결과 저장 후 수정할 수 있습니다.", "error");
+      return;
+    }
 
     const instruction = item.refineInput;
     setResults((prev) =>
@@ -194,6 +202,7 @@ function GenerateContent() {
 
     try {
       const data = await apiPost("/refine", {
+        gen_id: genId,
         original_copy: item.copy_text,
         user_instruction: instruction,
         conversation_history: item.chatHistory.map((h) => ({
@@ -208,6 +217,10 @@ function GenerateContent() {
             ? {
                 ...r,
                 copy_text: data.refined_copy,
+                version_history:
+                  r.version_history[r.version_history.length - 1] === data.refined_copy
+                    ? r.version_history
+                    : [...r.version_history, data.refined_copy],
                 chatHistory: [...r.chatHistory, { role: "assistant", content: data.refined_copy }],
                 isRefining: false,
               }
@@ -385,6 +398,11 @@ function GenerateContent() {
                   {/* 피드백 */}
                   <FeedbackButtons onFeedback={sendFeedback} />
                   <div className="flex gap-3">
+                    {copy.original_copy_text !== copy.copy_text && (
+                      <button onClick={() => copyToClipboard(copy.original_copy_text)} className="btn-outline px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
+                        원본 복사
+                      </button>
+                    )}
                     <button onClick={() => toggleRefine(index)} className="btn-outline px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
                       💬 {copy.showRefine ? "수정 닫기" : "AI 수정하기"}
                     </button>
@@ -397,6 +415,31 @@ function GenerateContent() {
                 {/* 수정 채팅 */}
                 {copy.showRefine && (
                   <div className="bg-[var(--bg-secondary)] border-t border-gray-800 p-4">
+                    <div className="mb-4 space-y-3">
+                      {copy.version_history.map((versionText, versionIndex) => {
+                        const isOriginal = versionIndex === 0;
+                        const isCurrent = versionIndex === copy.version_history.length - 1;
+                        return (
+                          <div key={versionIndex} className="rounded-xl border border-gray-700 bg-[var(--bg-primary)] p-4">
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                              <span className="text-xs font-semibold text-gray-400">
+                                {isOriginal ? "원본 카피" : `수정본 ${versionIndex}`}
+                                {isCurrent ? " · 현재 사용 중" : ""}
+                              </span>
+                              <button
+                                onClick={() => copyToClipboard(versionText)}
+                                className="text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
+                              >
+                                복사
+                              </button>
+                            </div>
+                            <div className="whitespace-pre-wrap text-sm leading-relaxed text-gray-200">
+                              {versionText}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                     <div className="max-h-60 overflow-y-auto mb-4 space-y-3 p-2">
                       {copy.chatHistory.map((msg, mi) => (
                         <div key={mi} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>

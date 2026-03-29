@@ -14,6 +14,8 @@ interface ChatMessage {
 interface CopyResult {
   rank: number;
   copy_text: string;
+  original_copy_text: string;
+  version_history: string[];
   strategy: string;
   score: number;
   showRefine: boolean;
@@ -43,6 +45,8 @@ function mapCopies(copies: Array<Record<string, unknown>> = []): CopyResult[] {
   return copies.map((copy, index) => ({
     rank: Number(copy.rank ?? index + 1),
     copy_text: String(copy.copy_text ?? copy.copy ?? copy.text ?? ""),
+    original_copy_text: String(copy.copy_text ?? copy.copy ?? copy.text ?? ""),
+    version_history: [String(copy.copy_text ?? copy.copy ?? copy.text ?? "")],
     strategy: String(copy.strategy ?? "전략"),
     score: Number(copy.score ?? ((copy.score_data as { mss_score_estimate?: number } | undefined)?.mss_score_estimate ?? 0)),
     showRefine: false,
@@ -209,6 +213,7 @@ export default function ResultDetailPage() {
 
     try {
       const data = await apiPost("/refine", {
+        gen_id: generationId,
         original_copy: item.copy_text,
         user_instruction: instruction,
         conversation_history: item.chatHistory.map((history) => ({
@@ -223,6 +228,10 @@ export default function ResultDetailPage() {
             ? {
                 ...result,
                 copy_text: data.refined_copy,
+                version_history:
+                  result.version_history[result.version_history.length - 1] === data.refined_copy
+                    ? result.version_history
+                    : [...result.version_history, data.refined_copy],
                 chatHistory: [...result.chatHistory, { role: "assistant", content: data.refined_copy }],
                 isRefining: false,
               }
@@ -338,6 +347,11 @@ export default function ResultDetailPage() {
                 <div className="p-4 bg-[var(--bg-secondary)] border-t border-gray-800 flex justify-between items-center">
                   <FeedbackButtons onFeedback={sendFeedback} />
                   <div className="flex gap-3">
+                    {copy.original_copy_text !== copy.copy_text && (
+                      <button onClick={() => copyToClipboard(copy.original_copy_text)} className="btn-outline px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
+                        원본 복사
+                      </button>
+                    )}
                     <button onClick={() => toggleRefine(index)} className="btn-outline px-4 py-2 rounded-lg flex items-center gap-2 text-sm">
                       💬 {copy.showRefine ? "수정 닫기" : "AI 수정하기"}
                     </button>
@@ -349,6 +363,31 @@ export default function ResultDetailPage() {
 
                 {copy.showRefine && (
                   <div className="bg-[var(--bg-secondary)] border-t border-gray-800 p-4">
+                    <div className="mb-4 space-y-3">
+                      {copy.version_history.map((versionText, versionIndex) => {
+                        const isOriginal = versionIndex === 0;
+                        const isCurrent = versionIndex === copy.version_history.length - 1;
+                        return (
+                          <div key={versionIndex} className="rounded-xl border border-gray-700 bg-[var(--bg-primary)] p-4">
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                              <span className="text-xs font-semibold text-gray-400">
+                                {isOriginal ? "원본 카피" : `수정본 ${versionIndex}`}
+                                {isCurrent ? " · 현재 사용 중" : ""}
+                              </span>
+                              <button
+                                onClick={() => copyToClipboard(versionText)}
+                                className="text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
+                              >
+                                복사
+                              </button>
+                            </div>
+                            <div className="whitespace-pre-wrap text-sm leading-relaxed text-gray-200">
+                              {versionText}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                     <div className="max-h-60 overflow-y-auto mb-4 space-y-3 p-2">
                       {copy.chatHistory.map((message, messageIndex) => (
                         <div key={messageIndex} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
