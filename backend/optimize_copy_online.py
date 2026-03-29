@@ -353,4 +353,9 @@ def run_optimization_online(
     print(f"\n📊 [성과 벤치마크] ML 원본 순위: {orig_rank}위 / {len(scored)}개 중")
     print(f"🏁 최적화 완료! (총 {len(scored)}개 분석, 소요시간: {time.time()-t_start:.1f}초)")
     
-    return [s for s in scored if 'score_data' in s][:3]
+    final_top_3 = [s for s in scored if 'score_data' in s][:3]
+    return {
+        "copies": final_top_3,
+        "original_rank": orig_rank,
+        "total_candidates": len(scored)
+    }

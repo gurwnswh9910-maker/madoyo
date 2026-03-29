@@ -194,7 +194,11 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
                     gen_record = _db.query(Generation).filter(Generation.id == task_uuid).first()
                     if gen_record:
                         gen_record.status = "completed"
-                        gen_record.results = {"copies": formatted_copies}
+                        gen_record.results = {
+                            "copies": formatted_copies,
+                            "original_rank": results.get("original_rank", -1),
+                            "total_candidates": results.get("total_candidates", 0)
+                        }
                         _db.commit()
                 except Exception as e:
                     import traceback
