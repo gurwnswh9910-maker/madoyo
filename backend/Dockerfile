@@ -15,7 +15,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # [V7-Fix] 컨테이너 내부 구조를 로컬과 동일하게 /app/backend/... 순으로 구성
 # 이렇게 하면 backend.api.main:app 접근이 항상 가능해집니다.
 COPY . /app/backend/
-RUN ls -R /app/backend/embedding_migration/
 WORKDIR /app/backend
 
 # 환경 변수 및 PYTHONPATH 설정 (모든 경로에서 모듈을 찾을 수 있도록 함)
