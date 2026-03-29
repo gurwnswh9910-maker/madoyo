@@ -1,4 +1,4 @@
-"""
+﻿"""
 카피 생성 API 라우터.
 /api/generate — 카피 생성 메인 엔드포인트
 /api/refine   — 챗봇 카피 수정 엔드포인트
@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import re
+import logging
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
@@ -29,12 +30,24 @@ from api.schemas import (
     TaskStatusResponse,
 )
 from api.config import GEMINI_API_KEY, MODEL_NAME, FALLBACK_MODEL_NAME, BASE_PATH, USE_CELERY, REWARD_COUNTDOWN_SEC
+from api.logging_utils import build_error_payload, get_logger, log_event, preview_text
 from api.services.context_builder import build_context
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 # 로컬(윈도우) 환경용 인메모리 태스크 저장소 (Redis 우회)
 LOCAL_TASKS = {}
+
+
+def _generation_request_context(request: GenerateRequest, user_id: str):
+    return {
+        "user_id": user_id,
+        "has_reference_copy": bool(request.reference_copy),
+        "image_count": len(request.image_urls or []),
+        "has_reference_url": bool(request.reference_url),
+        "appeal_point_preview": preview_text(request.appeal_point, limit=40),
+    }
 
 
 # ════════════════════════════════════════════════════════════════
@@ -75,6 +88,8 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
     
     from api.database import SessionLocal, Generation, User
     db = SessionLocal()
+    request_context = _generation_request_context(request, str(current_user.id))
+    log_event(logger, logging.INFO, "generate.request.received", **request_context)
     
     try:
         # [MVP V7] 크레딧 체크 및 차감
@@ -84,6 +99,13 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
         
         user.credits -= 1
         db.commit()
+        log_event(
+            logger,
+            logging.INFO,
+            "generate.credits.deducted",
+            user_id=str(current_user.id),
+            remaining_credits=user.credits,
+        )
 
         # Step 1: 비동기 태스크 호출 (스크래핑/분석 포함)
         if USE_CELERY:
@@ -111,6 +133,14 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
                 model_name=MODEL_NAME,
                 user_id=None # 현재는 단일 유저
             )
+            log_event(
+                logger,
+                logging.INFO,
+                "generate.task.queued.celery",
+                task_id=str(gen.id),
+                user_id=str(current_user.id),
+                celery_task_id=task.id,
+            )
             return TaskResponse(task_id=str(gen.id), status="PENDING")
         else:
             # [ONLINE-ISOLATION] 환경 변수에 따른 엔진 스위칭
@@ -129,12 +159,23 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
             db.commit()
             db.refresh(gen)
             task_id = str(gen.id)
+            log_event(
+                logger,
+                logging.INFO,
+                "generate.task.created",
+                task_id=task_id,
+                user_id=str(current_user.id),
+                mode="background",
+            )
 
             # 대표님 지침에 따라 로컬 테스트(오프라인 모드)를 완전히 제거하고 무조건 Supabase 모드 사용
             def run_local_task(t_id, req, api_key, m_name, u_id):
                 from api.database import SessionLocal, Generation
                 import uuid as uuid_pkg
                 _db = SessionLocal()
+                stage = "bootstrap"
+                original_copy = req.reference_copy or ""
+                log_event(logger, logging.INFO, "generate.task.started", task_id=t_id, user_id=u_id)
                 
                 print("🚀 [클라우드 전용 아키텍처] 무조건 Supabase DB 네이티브 가동 (optimize_copy_online)")
                 from optimize_copy_online import run_optimization_online as run_optimized_engine
@@ -143,9 +184,16 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
                     # [MVP V7] Selenium(Chrome) 임시 비활성화하여 512MB RAM OOM 방지
                     # reference_url이 있어도 스크래핑을 건너뛰고 텍스트/이미지만으로 분석합니다.
                     product_focus = None
-                    original_copy = req.reference_copy or ""
 
                     if req.reference_url:
+                        stage = "reference_url_bypassed"
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            "generate.task.reference_url_bypassed",
+                            task_id=t_id,
+                            reference_url=preview_text(req.reference_url, limit=120),
+                        )
                         print(f"[MVP V7] URL Scraping Bypassed: {req.reference_url}")
                         # URL 정보는 나중에 로컬에서 처리할 수 있도록 로그로 남기고 기본 컨텍스트 구성
                         if not original_copy:
@@ -153,6 +201,7 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
 
                     # 이미지 분석은 Chrome을 쓰지 않으므로 정상 유지
                     from api.services.context_builder import build_context
+                    stage = "build_context"
                     product_focus, build_copy = build_context(
                         api_key=api_key,
                         model_name=m_name,
@@ -161,17 +210,27 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
                         reference_url=None, # URL 스크래핑 건너뜀
                         appeal_point=req.appeal_point,
                     )
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        "generate.task.context_built",
+                        task_id=t_id,
+                        product_focus_type=type(product_focus).__name__,
+                        has_build_copy=bool(build_copy),
+                    )
                     
                     if build_copy:
                         original_copy = build_copy
 
                     # original_copy 보정
+                    stage = "normalize_original_copy"
                     if not original_copy or not original_copy.strip():
                         if isinstance(product_focus, dict):
                             original_copy = product_focus.get("marketing_insight", "제품 홍보 카피")
                         else:
                             original_copy = str(product_focus)
 
+                    stage = "run_optimization"
                     results = run_optimized_engine(
                         original_copy=original_copy,
                         product_focus=product_focus,
@@ -179,6 +238,16 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
                         model_name=m_name,
                         user_id=u_id
                     )
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        "generate.task.optimization_completed",
+                        task_id=t_id,
+                        total_candidates=results.get("total_candidates", 0),
+                        original_rank=results.get("original_rank", -1),
+                        top_copy_count=len(results.get("copies", [])),
+                    )
+                    stage = "format_results"
                     formatted_copies = []
                     for i, res in enumerate(results["copies"]):
                         formatted_copies.append({
@@ -190,6 +259,7 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
                         })
                     
                     # DB 업데이트 (UUID 변환 최적화)
+                    stage = "persist_results"
                     task_uuid = uuid_pkg.UUID(t_id)
                     gen_record = _db.query(Generation).filter(Generation.id == task_uuid).first()
                     if gen_record:
@@ -200,15 +270,32 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
                             "total_candidates": results.get("total_candidates", 0)
                         }
                         _db.commit()
+                    log_event(
+                        logger,
+                        logging.INFO,
+                        "generate.task.completed",
+                        task_id=t_id,
+                        stored_copy_count=len(formatted_copies),
+                    )
                 except Exception as e:
-                    import traceback
-                    print(traceback.format_exc())
+                    logger.exception(
+                        "generate.task.failed | task_id=%r stage=%r user_id=%r",
+                        t_id,
+                        stage,
+                        u_id,
+                    )
                     # 에러 상태 기록
                     task_uuid = uuid_pkg.UUID(t_id)
                     gen_record = _db.query(Generation).filter(Generation.id == task_uuid).first()
                     if gen_record:
                         gen_record.status = "error"
-                        gen_record.results = {"error": str(e)}
+                        gen_record.results = build_error_payload(
+                            stage,
+                            e,
+                            task_id=t_id,
+                            user_id=u_id,
+                            original_copy_preview=preview_text(original_copy, limit=120),
+                        )
                         _db.commit()
                 finally:
                     _db.close()
@@ -223,8 +310,10 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
             )
             return TaskResponse(task_id=task_id, status="PENDING")
 
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"\n[API] ❌ 카피 생성 요청 중 오류: {e}")
+        logger.exception("generate.request.failed | user_id=%r", str(current_user.id))
         raise HTTPException(status_code=500, detail=f"작업 접수 중 오류 발생: {str(e)}")
     finally:
         db.close()
@@ -260,6 +349,8 @@ def get_task_status(task_id: str):
                     response["result"] = gen.results
                 elif gen.status == "error":
                     response["error"] = gen.results.get("error", "Unknown error")
+                    if isinstance(gen.results, dict) and gen.results.get("error_stage"):
+                        response["error_stage"] = gen.results.get("error_stage")
                 return response
             else:
                 return {"task_id": task_id, "status": "FAILURE", "error": "Task not found in database"}

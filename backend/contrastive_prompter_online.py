@@ -1,8 +1,13 @@
 import numpy as np
 import os
+import logging
 from sqlalchemy.orm import Session
 from api.database import SessionLocal, MABEmbedding
 from sqlalchemy import text as sql_text
+from api.logging_utils import get_logger
+
+
+logger = get_logger(__name__)
 
 class ContrastivePrompter:
     """[ONLINE VERSION] SQL 기반 실시간 대조 Few-Shot 프롬프트 생성기"""
@@ -73,6 +78,11 @@ class ContrastivePrompter:
             if result and result.sim > 0.6: return result.content_text, result.mss_score
             return None, None
         except Exception as e:
+            logger.exception(
+                "contrastive.dynamic_pair.failed | high_mss=%r high_preview=%r",
+                high_mss,
+                str(high_post_text)[:80],
+            )
             print(f"Error finding contrastive pair: {e}")
             return None, None
         finally:

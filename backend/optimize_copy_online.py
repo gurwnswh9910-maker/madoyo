@@ -6,6 +6,7 @@
 import os
 import re
 import time
+import logging
 import numpy as np
 import pandas as pd
 import concurrent.futures
@@ -17,6 +18,10 @@ from contrastive_prompter_online import ContrastivePrompter
 from copy_generator_v2 import DynamicCopyGenerator
 from copy_scorer_v5_online import CopyScorerV5
 from api.config import STATIC_STRATEGIES
+from api.logging_utils import get_logger, log_event, preview_text
+
+
+logger = get_logger(__name__)
 
 
 def clean_marketing_text(text):
@@ -57,6 +62,7 @@ def generate_single_task(client, model, task):
     prompt = task['prompt']
     strat_label = task['strat_label']
     t_gen = time.time()
+    log_event(logger, logging.INFO, "optimize.generate_single.started", cid=cid, strategy=strat_label, model=model)
     try:
         for attempt in range(2):
             try:
@@ -82,13 +88,24 @@ def generate_single_task(client, model, task):
                     clean_text = re.sub(r'^```.*?\n|```$', '', clean_text, flags=re.MULTILINE).strip()
                     copies = [clean_text]
 
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "optimize.generate_single.completed",
+                    cid=cid,
+                    strategy=strat_label,
+                    copy_count=len(copies),
+                    elapsed=f"{gen_time:.2f}s",
+                )
                 return {"success": True, "cid": cid, "copies": copies, "strategy": strat_label, "time": gen_time}
             except Exception as e:
                 if "429" in str(e) and attempt == 0:
+                    log_event(logger, logging.WARNING, "optimize.generate_single.retry_429", cid=cid, attempt=attempt + 1)
                     time.sleep(10)
                     continue
                 raise e
     except Exception as e:
+        logger.exception("optimize.generate_single.failed | cid=%r strategy=%r", cid, strat_label)
         return {"success": False, "cid": cid, "error": str(e)}
 
 
@@ -136,6 +153,13 @@ def extract_dynamic_all(client, model, product_info, pairs, static_strats=None):
 """
     try:
         response = client.models.generate_content(model=model, contents=prompt)
+        log_event(
+            logger,
+            logging.INFO,
+            "optimize.extract_dynamic.completed",
+            pair_count=len(pairs),
+            has_static=bool(static_strats),
+        )
         return response.text.strip()
     except Exception as e:
         print(f"    ⚠️ 동적 전략 추출 실패: {e}")
@@ -149,7 +173,8 @@ def run_optimization_online(
     model_name: str,
     input_image_urls: List[str] = None,
     user_id: str = None,
-    shared_resources: Dict = None
+    shared_resources: Dict = None,
+    task_id: str = None,
 ):
     """[ONLINE VERSION] SQL(pgvector) 기반 실시간 하이브리드 카피 최적화 엔진"""
     
@@ -164,6 +189,15 @@ def run_optimization_online(
     
     if shared_resources is None: shared_resources = {}
     target_img = input_image_urls[0] if input_image_urls else None
+    log_event(
+        logger,
+        logging.INFO,
+        "optimize.run.started",
+        task_id=task_id,
+        user_id=user_id,
+        mode="multimodal" if input_image_urls else "text",
+        original_copy_preview=preview_text(original_copy, limit=80),
+    )
     
     # ══════════════════════════════════════════════════════════════
     # 1. SQL 기반 임베딩 매니저 & 스코어러 로드
@@ -204,8 +238,20 @@ def run_optimization_online(
 
     if filtered_subset.empty:
         print("   ⚠️ 회수된 데이터가 없습니다. 빈 결과를 반환합니다.")
-        return []
+        log_event(logger, logging.WARNING, "optimize.retrieval.empty", task_id=task_id)
+        return {
+            "copies": [],
+            "original_rank": -1,
+            "total_candidates": 0,
+        }
 
+    log_event(
+        logger,
+        logging.INFO,
+        "optimize.retrieval.completed",
+        task_id=task_id,
+        retrieved_count=len(filtered_subset),
+    )
     best_similar_posts = filtered_subset.head(10)
     top_examples_for_gen = best_similar_posts[['본문', 'MSS']].to_dict('records')
     
@@ -241,6 +287,7 @@ def run_optimization_online(
     print(f"   📊 대조쌍 {len(dynamic_pairs)}개 확보")
     
     # 병렬 실행: 동적 전략 추출 + 정적 전략 카피 생성
+    log_event(logger, logging.INFO, "optimize.contrastive_pairs.ready", task_id=task_id, pair_count=len(dynamic_pairs))
     MAX_WORKERS = 15
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         # 동적 전략 추출 (비동기)
@@ -290,7 +337,15 @@ def run_optimization_online(
             for fut in list(done_futs):
                 if fut in generation_futures:
                     task_info = generation_futures.pop(fut)
-                    res = fut.result()
+                    try:
+                        res = fut.result()
+                    except Exception as exc:
+                        logger.exception(
+                            "optimize.generation_future.failed | task_id=%r cid=%r",
+                            task_id,
+                            task_info.get("cid"),
+                        )
+                        res = {"success": False, "cid": task_info.get("cid"), "error": str(exc)}
                     if res["success"]:
                         for i, t_copy in enumerate(res["copies"]):
                             t_copy = clean_marketing_text(t_copy)
@@ -334,6 +389,7 @@ def run_optimization_online(
         scoring_results = scorer.score_candidates(candidates_data, orig_index=orig_idx)
     except Exception as e:
         print(f"    ⚠️ 채점 실패. 에러: {e}")
+        logger.exception("optimize.scoring.failed | task_id=%r candidate_count=%r", task_id, len(candidates_data))
         scoring_results = []
     
     for rank_meta in scoring_results:
@@ -350,6 +406,16 @@ def run_optimization_online(
     scored = sorted(scored, key=lambda x: x.get('total_score', 0), reverse=True)
     
     orig_rank = next((i+1 for i, item in enumerate(scored) if item['cid'] == 'Original'), -1)
+    log_event(
+        logger,
+        logging.INFO,
+        "optimize.run.completed",
+        task_id=task_id,
+        original_rank=orig_rank,
+        total_candidates=len(scored),
+        top_copy_count=len([s for s in scored if 'score_data' in s][:3]),
+        elapsed=f"{time.time()-t_start:.1f}s",
+    )
     print(f"\n📊 [성과 벤치마크] ML 원본 순위: {orig_rank}위 / {len(scored)}개 중")
     print(f"🏁 최적화 완료! (총 {len(scored)}개 분석, 소요시간: {time.time()-t_start:.1f}초)")
     

@@ -1,22 +1,20 @@
-import os
+﻿import os
 import sys
+import logging
 from celery import Celery
 from dotenv import load_dotenv
+from api.logging_utils import get_logger, log_event, preview_text
 
 load_dotenv()
 
-
-# Redis URL 설정 (기본값: localhost:6379/0)
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-# Celery 앱 인스턴스 생성
 celery_app = Celery(
     "copy_worker",
     broker=REDIS_URL,
-    backend=REDIS_URL
+    backend=REDIS_URL,
 )
 
-# Celery 설정 최적화
 celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
@@ -24,27 +22,64 @@ celery_app.conf.update(
     timezone="Asia/Seoul",
     enable_utc=True,
     task_track_started=True,
-    task_time_limit=3600, # 최대 1시간
+    task_time_limit=3600,
 )
 
-# 코어 모듈 경로 추가 (backend 상위 디렉토리)
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
+logger = get_logger(__name__)
+
+
+def _format_results(results):
+    formatted_copies = []
+    for index, result in enumerate(results or []):
+        formatted_copies.append(
+            {
+                "rank": index + 1,
+                "copy_text": result.get("copy", ""),
+                "strategy": result.get("strategy", "strategy"),
+                "score": result.get("score_data", {}).get("mss_score_estimate", 0),
+                "reason": result.get("score_data", {}).get("reason", ""),
+            }
+        )
+    return formatted_copies
+
+
 @celery_app.task(name="optimize_copy_task", bind=True)
-def optimize_copy_task(self, reference_copy=None, image_urls=None, reference_url=None, appeal_point=None, api_key=None, model_name=None, user_id=None):
-    """
-    카피 생성 최적화 작업을 수행하는 비동기 태스크 (스크래핑 포함)
-    """
+def optimize_copy_task(
+    self,
+    reference_copy=None,
+    image_urls=None,
+    reference_url=None,
+    appeal_point=None,
+    api_key=None,
+    model_name=None,
+    user_id=None,
+    generation_id=None,
+    request_id=None,
+):
+    """Run copy optimization in a background worker."""
+    log_event(
+        logger,
+        logging.INFO,
+        "worker.optimize_copy.started",
+        task_id=self.request.id,
+        user_id=user_id,
+        generation_id=generation_id,
+        request_id=request_id or generation_id or self.request.id,
+        has_reference_copy=bool(reference_copy),
+        image_count=len(image_urls or []),
+        has_reference_url=bool(reference_url),
+    )
+
     from optimize_copy_v2 import run_optimization
     from api.services.context_builder import build_context
-    
-    # 작업 상태 업데이트 (컨텍스트 빌딩 시작)
-    self.update_state(state="PROGRESS", meta={"status": "입력 분석 및 스크래핑 시작..."})
-    
+
+    self.update_state(state="PROGRESS", meta={"status": "Building context..."})
+
     try:
-        # ── 배경에서 컨텍스트 빌딩 (스크래핑 등) 수행 ──
         product_focus, original_copy = build_context(
             api_key=api_key,
             model_name=model_name,
@@ -53,155 +88,230 @@ def optimize_copy_task(self, reference_copy=None, image_urls=None, reference_url
             reference_url=reference_url,
             appeal_point=appeal_point,
         )
+        log_event(
+            logger,
+            logging.INFO,
+            "worker.optimize_copy.context_built",
+            task_id=self.request.id,
+            generation_id=generation_id,
+            request_id=request_id or generation_id or self.request.id,
+            product_focus_type=type(product_focus).__name__,
+            original_copy_preview=preview_text(original_copy, limit=80),
+        )
 
-        # original_copy 보정
         if not original_copy or not original_copy.strip():
             if isinstance(product_focus, dict):
-                original_copy = product_focus.get("marketing_insight", "제품 홍보 카피")
+                original_copy = product_focus.get("marketing_insight", "product marketing copy")
             else:
                 original_copy = str(product_focus)
 
-        # 실제 최적화 엔진 실행
-        self.update_state(state="PROGRESS", meta={"status": "카피 최적화 생성 중..."})
+        self.update_state(state="PROGRESS", meta={"status": "Running optimization..."})
         results = run_optimization(
             original_copy=original_copy,
             product_focus=product_focus,
             api_key=api_key,
             model_name=model_name,
-            user_id=user_id
+            user_id=user_id,
         )
-        
-        # 결과 포맷팅 (schemas.py의 CopyResult 형식에 맞춤)
-        formatted_copies = []
-        for i, res in enumerate(results):
-            formatted_copies.append({
-                "rank": i + 1,
-                "copy_text": res.get("copy", ""),
-                "strategy": res.get("strategy", "전략"),
-                "score": res.get("score_data", {}).get("mss_score_estimate", 0),
-                "reason": res.get("score_data", {}).get("reason", "")
-            })
-            
-        return {"status": "SUCCESS", "results": {"copies": formatted_copies}}
-    except Exception as e:
-        # 에러 발생 시 상세 내용 반환
+        log_event(
+            logger,
+            logging.INFO,
+            "worker.optimize_copy.completed",
+            task_id=self.request.id,
+            generation_id=generation_id,
+            request_id=request_id or generation_id or self.request.id,
+            result_count=len(results or []),
+        )
+
+        return {"status": "SUCCESS", "results": {"copies": _format_results(results)}}
+    except Exception as error:
+        logger.exception(
+            "worker.optimize_copy.failed | task_id=%r generation_id=%r request_id=%r user_id=%r",
+            self.request.id,
+            generation_id,
+            request_id or generation_id or self.request.id,
+            user_id,
+        )
         import traceback
-        error_msg = f"에러 발생: {str(e)}\n{traceback.format_exc()}"
-        print(error_msg)
-        return {"status": "FAILED", "error": str(e)}
+
+        error_message = f"Worker optimize_copy failed: {error}\n{traceback.format_exc()}"
+        print(error_message)
+        return {"status": "FAILED", "error": str(error)}
+
 
 @celery_app.task(name="process_excel_task", bind=True)
 def process_excel_task(self, file_path, uploader_id=None, is_global=True, bulk_job_id=None):
-    """
-    업로드된 엑셀 파일을 파싱하여 URL 목록을 추출하고 각각 비동기 태스크로 분배합니다.
-    """
+    """Load a spreadsheet, discover URL rows, and fan out worker tasks."""
     import pandas as pd
     import uuid as uuid_pkg
-    
+
+    log_event(
+        logger,
+        logging.INFO,
+        "worker.process_excel.started",
+        task_id=self.request.id,
+        bulk_job_id=bulk_job_id,
+        uploader_id=uploader_id,
+        file_path=preview_text(file_path, limit=120),
+    )
     print(f"[Worker] Starting process_excel_task for {file_path}, Job: {bulk_job_id}")
-    
+
     try:
-        if file_path.endswith('.csv'):
-             df = pd.read_csv(file_path)
+        if file_path.endswith(".csv"):
+            df = pd.read_csv(file_path)
         else:
-             df = pd.read_excel(file_path)
-             
+            df = pd.read_excel(file_path)
+
         print(f"[Worker] File loaded. Rows: {len(df)}, Columns: {df.columns.tolist()}")
-        urls_to_process = []
-        
-        # '링크' 또는 'URL' 칼럼 찾기
+        log_event(
+            logger,
+            logging.INFO,
+            "worker.process_excel.loaded",
+            task_id=self.request.id,
+            row_count=len(df),
+            column_count=len(df.columns),
+        )
+
         url_col = None
         for col in df.columns:
-            if '링크' in str(col) or 'url' in str(col).lower():
+            column_name = str(col).lower()
+            if "link" in column_name or "url" in column_name:
                 url_col = col
                 break
-                
+
         if url_col:
             urls_to_process = df[url_col].dropna().tolist()
             print(f"[Worker] Found {len(urls_to_process)} URLs in column '{url_col}'")
+            log_event(
+                logger,
+                logging.INFO,
+                "worker.process_excel.urls_found",
+                task_id=self.request.id,
+                url_count=len(urls_to_process),
+                url_column=str(url_col),
+            )
         else:
-            print(f"[Worker] FAILED: No '링크' or 'URL' column found.")
-            return {"status": "FAILED", "error": "엑셀에 '링크' 혹은 'URL' 컬럼이 없습니다."}
-            
+            log_event(
+                logger,
+                logging.WARNING,
+                "worker.process_excel.url_column_missing",
+                task_id=self.request.id,
+                columns=[str(column) for column in df.columns],
+            )
+            print("[Worker] FAILED: No link or URL column found.")
+            return {"status": "FAILED", "error": "No link or URL column found in uploaded file."}
+
         from api.database import SessionLocal, Generation
+
         db = SessionLocal()
         try:
-            # uploader_id를 UUID 객체로 변환 (DB 저장용)
             user_uuid = None
             if uploader_id:
                 try:
                     user_uuid = uuid_pkg.UUID(uploader_id)
-                except:
+                except Exception:
                     user_uuid = uploader_id
-                    
-            # URL마다 DB에 pending (대기중) 상태로 껍데기 저장 후 워커 생성
+
             for url in urls_to_process:
                 url_str = str(url).strip()
-                if "http" in url_str:
-                    gen = Generation(
-                        bulk_job_id=bulk_job_id,
-                        user_id=user_uuid,
-                        input_config={"url": url_str, "scraped_text": "💡 처리 대기 중..."},
-                        results={},
-                        status="pending"
-                    )
-                    db.add(gen)
-                    db.commit()
-                    db.refresh(gen)
-                    print(f"[Worker] Inserted pending gen for {url_str}, GenID: {gen.id}")
-                    
-                    scrape_and_generate_single_task.delay(
-                        url=url_str,
-                        bulk_job_id=bulk_job_id,
-                        uploader_id=uploader_id, # delay에는 원래값 전달
-                        is_global=is_global,
-                        generation_id=str(gen.id)
-                    )
+                if "http" not in url_str:
+                    continue
+
+                generation = Generation(
+                    bulk_job_id=bulk_job_id,
+                    user_id=user_uuid,
+                    input_config={"url": url_str, "scraped_text": "Pending scrape..."},
+                    results={},
+                    status="pending",
+                )
+                db.add(generation)
+                db.commit()
+                db.refresh(generation)
+                print(f"[Worker] Inserted pending generation for {url_str}, GenID: {generation.id}")
+
+                scrape_and_generate_single_task.delay(
+                    url=url_str,
+                    bulk_job_id=bulk_job_id,
+                    uploader_id=uploader_id,
+                    is_global=is_global,
+                    generation_id=str(generation.id),
+                )
         finally:
             db.close()
-        
-        # 임시 파일 삭제
+
         if os.path.exists(file_path):
             os.remove(file_path)
-            
+
+        log_event(
+            logger,
+            logging.INFO,
+            "worker.process_excel.completed",
+            task_id=self.request.id,
+            spawned_tasks=len(urls_to_process),
+        )
         return {"status": "SUCCESS", "spawned_tasks": len(urls_to_process)}
-    except Exception as e:
-        return {"status": "FAILED", "error": str(e)}
+    except Exception as error:
+        logger.exception("worker.process_excel.failed | task_id=%r bulk_job_id=%r", self.request.id, bulk_job_id)
+        return {"status": "FAILED", "error": str(error)}
+
 
 @celery_app.task(name="scrape_and_generate_single_task", bind=True)
 def scrape_and_generate_single_task(self, url, bulk_job_id, uploader_id=None, is_global=True, generation_id=None):
-    """
-    [Track 1] 단일 URL 스크래핑 -> DB 학습 -> 카피 대량 생성 로직
-    """
+    """Scrape one URL, learn from it, and generate copy suggestions."""
     import uuid as uuid_pkg
+
+    log_event(
+        logger,
+        logging.INFO,
+        "worker.scrape_generate.started",
+        task_id=self.request.id,
+        generation_id=generation_id,
+        bulk_job_id=bulk_job_id,
+        url=preview_text(url, limit=120),
+    )
     print(f"[Worker] Submitting task for {url}, GenID: {generation_id}")
-    
+
     from api.database import SessionLocal, MABEmbedding, Generation
     from embedding_utils import EmbeddingManager
     from api.services.scraper_service import get_threads_full_data, calculate_mss_from_metrics
     from optimize_copy_v2 import run_optimization
     from api.config import GEMINI_API_KEY, MODEL_NAME
-    
+    from google import genai
+    from marketing_focus_extractor import extract_marketing_focus
+
     db = SessionLocal()
     emb_mgr = EmbeddingManager()
-    
+
     try:
-        # 1. 스크래핑 및 지표 추출
         data = get_threads_full_data(url)
         if not data or not data.get("content_text"):
+            log_event(
+                logger,
+                logging.WARNING,
+                "worker.scrape_generate.scrape_empty",
+                task_id=self.request.id,
+                generation_id=generation_id,
+            )
             if generation_id:
                 gid = uuid_pkg.UUID(generation_id) if isinstance(generation_id, str) else generation_id
                 generation = db.query(Generation).filter(Generation.id == gid).first()
                 if generation:
-                    generation.input_config = {"url": url, "scraped_text": "스크래핑 실패: 텍스트를 찾을 수 없거나 차단됨"}
+                    generation.input_config = {"url": url, "scraped_text": "Scrape failed: content text not found."}
                     generation.status = "error"
                     db.commit()
-            return {"status": "FAILED", "error": "스크래핑 데이터가 없거나 텍스트를 찾을 수 없습니다."}
-            
+            return {"status": "FAILED", "error": "No scraped text was found for the URL."}
+
         content_text = data["content_text"]
         mss = calculate_mss_from_metrics(data)
-        
-        # 2. 임베딩(학습 데이터 추가)
+        log_event(
+            logger,
+            logging.INFO,
+            "worker.scrape_generate.scrape_completed",
+            task_id=self.request.id,
+            generation_id=generation_id,
+            mss=mss,
+        )
+
         vector = emb_mgr.get_text_embedding(content_text)
         new_entry = MABEmbedding(
             content_text=content_text,
@@ -210,47 +320,46 @@ def scrape_and_generate_single_task(self, url, bulk_job_id, uploader_id=None, is
             embedding=vector,
             uploader_id=uploader_id,
             is_global=is_global,
-            metadata_json={"source": "url_bulk", "url": url, "metrics": data}
+            metadata_json={"source": "url_bulk", "url": url, "metrics": data},
         )
         db.add(new_entry)
-        db.commit() # 학습 데이터 적재 완료
-        
-        # 3. 마케팅 소구점 및 맥락 분석 (Vision 기반)
+        db.commit()
+
         print(f"[Worker] Extracting marketing focus for {url}...")
-        from google import genai
-        from marketing_focus_extractor import extract_marketing_focus
-        
         client = genai.Client(api_key=GEMINI_API_KEY)
-        # 스크래핑된 지표와 미디어를 기반으로 소구점 추출
         product_focus = extract_marketing_focus(
             client=client,
             model_name=MODEL_NAME,
-            product_name="제품", # 상세 상품명을 모를 경우 placeholder
+            product_name="product",
             original_text=content_text,
-            threads_images=data.get("image_urls", [])
+            threads_images=data.get("image_urls", []),
         )
-        
-        # 4. 카피 생성 (최신 MAB 반영)
+        log_event(
+            logger,
+            logging.INFO,
+            "worker.scrape_generate.focus_completed",
+            task_id=self.request.id,
+            generation_id=generation_id,
+        )
+
         results = run_optimization(
             original_copy=content_text,
-            product_focus=product_focus, # 분석된 소구점 전달
+            product_focus=product_focus,
             api_key=GEMINI_API_KEY,
             model_name=MODEL_NAME,
-            user_id=uploader_id
+            user_id=uploader_id,
         )
-        
-        # 결과 포맷팅
-        formatted_copies = []
-        for i, res in enumerate(results):
-            formatted_copies.append({
-                "rank": i + 1,
-                "copy_text": res.get("copy", ""),
-                "strategy": res.get("strategy", "전략"),
-                "score": res.get("score_data", {}).get("mss_score_estimate", 0),
-                "reason": res.get("score_data", {}).get("reason", "")
-            })
-        
-        # 4. DB 히스토리 업데이트
+        log_event(
+            logger,
+            logging.INFO,
+            "worker.scrape_generate.optimization_completed",
+            task_id=self.request.id,
+            generation_id=generation_id,
+            result_count=len(results or []),
+        )
+
+        formatted_copies = _format_results(results)
+
         if generation_id:
             gid = uuid_pkg.UUID(generation_id) if isinstance(generation_id, str) else generation_id
             generation = db.query(Generation).filter(Generation.id == gid).first()
@@ -260,14 +369,21 @@ def scrape_and_generate_single_task(self, url, bulk_job_id, uploader_id=None, is
                 generation.results = {"copies": formatted_copies}
                 generation.status = "completed"
                 db.commit()
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "worker.scrape_generate.completed",
+                    task_id=self.request.id,
+                    generation_id=generation_id,
+                    mode="existing_generation",
+                )
                 return {"status": "SUCCESS", "url": url}
-        
-        # (Fall-back) uploader_id를 매핑해서 직접 새로 만듦
+
         user_uuid = None
         if uploader_id:
             try:
                 user_uuid = uuid_pkg.UUID(uploader_id) if isinstance(uploader_id, str) else uploader_id
-            except:
+            except Exception:
                 user_uuid = uploader_id
 
         generation = Generation(
@@ -275,51 +391,86 @@ def scrape_and_generate_single_task(self, url, bulk_job_id, uploader_id=None, is
             user_id=user_uuid,
             input_config={"url": url, "scraped_text": content_text[:100]},
             results={"copies": formatted_copies},
-            status="completed"
+            status="completed",
         )
         db.add(generation)
         db.commit()
         print(f"[Worker] Success (Fallback ID used) for {url}")
+        log_event(
+            logger,
+            logging.INFO,
+            "worker.scrape_generate.completed",
+            task_id=self.request.id,
+            generation_id=generation_id,
+            mode="fallback_generation",
+        )
         return {"status": "SUCCESS", "url": url}
-        
-    except Exception as e:
+    except Exception as error:
         db.rollback()
-        return {"status": "FAILED", "error": str(e)}
+        logger.exception("worker.scrape_generate.failed | task_id=%r generation_id=%r url=%r", self.request.id, generation_id, url)
+        return {"status": "FAILED", "error": str(error)}
     finally:
         db.close()
 
+
 @celery_app.task(name="update_post_performance_task", bind=True)
 def update_post_performance_task(self, url, feedback_id):
-    """
-    [Track 2] 24시간 뒤 실행되어 URL 성과 수집, 임베딩 추가, 크레딧 환급 처리
-    """
-    from api.database import SessionLocal, MABFeedback, MABEmbedding, User
+    """Refresh post performance and grant reward credits when applicable."""
+    log_event(
+        logger,
+        logging.INFO,
+        "worker.update_performance.started",
+        task_id=self.request.id,
+        feedback_id=feedback_id,
+        url=preview_text(url, limit=120),
+    )
+
+    from api.database import SessionLocal, MABFeedback, MABEmbedding, User, Generation
     from embedding_utils import EmbeddingManager
     from api.services.scraper_service import get_threads_full_data, calculate_mss_from_metrics
-    
+
     db = SessionLocal()
     emb_mgr = EmbeddingManager()
-    
+
     try:
         feedback = db.query(MABFeedback).filter(MABFeedback.gen_id == feedback_id).first()
         if not feedback:
+            log_event(
+                logger,
+                logging.WARNING,
+                "worker.update_performance.feedback_missing",
+                task_id=self.request.id,
+                feedback_id=feedback_id,
+            )
             return "Feedback entry not found"
-            
+
         if feedback.status != "pending":
+            log_event(
+                logger,
+                logging.INFO,
+                "worker.update_performance.skipped",
+                task_id=self.request.id,
+                feedback_id=feedback_id,
+                status=feedback.status,
+            )
             return f"Feedback already processed: {feedback.status}"
-            
+
         data = get_threads_full_data(url)
         if not data or not data.get("content_text"):
             feedback.status = "rejected"
             db.commit()
+            log_event(
+                logger,
+                logging.WARNING,
+                "worker.update_performance.scrape_empty",
+                task_id=self.request.id,
+                feedback_id=feedback_id,
+            )
             return "No data scraped or post deleted"
-            
-        # (코사인 유사도 대신) 단순히 DB에 있는 URL인지 검증은 프론트/API단에서 사전 차단함
-        # 지표 산출
+
         mss = calculate_mss_from_metrics(data)
         content_text = data["content_text"]
-        
-        # 임베딩 추가 (지식 최신화)
+
         vector = emb_mgr.get_text_embedding(content_text)
         entry = MABEmbedding(
             content_text=content_text,
@@ -327,33 +478,40 @@ def update_post_performance_task(self, url, feedback_id):
             mss_score=mss,
             embedding=vector,
             is_global=True,
-            metadata_json={"source": "feedback_reward", "url": url, "metrics": data}
+            metadata_json={"source": "feedback_reward", "url": url, "metrics": data},
         )
         db.add(entry)
-        
-        # 성과 및 보상 기록
+
         feedback.performance = data
         feedback.status = "completed"
-        feedback.reward_credits = 2  # 보상 2 크레딧
-        
-        # 유저 크레딧 충전 (직접 쿼리로 유저 확인)
-        from api.database import Generation
-        gen = db.query(Generation).filter(Generation.id == feedback_id).first()
-        if gen and gen.user_id:
-            user = db.query(User).filter(User.id == gen.user_id).first()
+        feedback.reward_credits = 2
+
+        generation = db.query(Generation).filter(Generation.id == feedback_id).first()
+        if generation and generation.user_id:
+            user = db.query(User).filter(User.id == generation.user_id).first()
             if user:
                 user.credits += feedback.reward_credits
-        
+
         db.commit()
+        log_event(
+            logger,
+            logging.INFO,
+            "worker.update_performance.completed",
+            task_id=self.request.id,
+            feedback_id=feedback_id,
+            mss=mss,
+            reward_credits=feedback.reward_credits,
+        )
         return f"Success: {url} -> Given 2 credits, MSS: {mss}"
-        
-    except Exception as e:
+    except Exception as error:
         db.rollback()
+        logger.exception("worker.update_performance.failed | task_id=%r feedback_id=%r url=%r", self.request.id, feedback_id, url)
         from api.database import MABFeedback
+
         feedback = db.query(MABFeedback).filter(MABFeedback.gen_id == feedback_id).first()
         if feedback:
             feedback.status = "error"
             db.commit()
-        return f"Error: {e}"
+        return f"Error: {error}"
     finally:
         db.close()
