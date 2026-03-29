@@ -183,7 +183,7 @@ export default function MyPage() {
                   
                   <div className="flex justify-end gap-2">
                     {/* View Button */}
-                    <button onClick={() => router.push(`/generate?id=${gen.id}`)} className="text-sm text-gray-400 hover:text-white px-3 py-1 bg-gray-800 rounded-lg transition-colors">
+                    <button onClick={() => router.push(`/results/${gen.id}`)} className="text-sm text-gray-400 hover:text-white px-3 py-1 bg-gray-800 rounded-lg transition-colors">
                       자세히 보기
                     </button>
                     

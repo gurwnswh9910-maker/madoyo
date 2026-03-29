@@ -26,10 +26,10 @@ const LOADING_PHASES = [
 
 function GenerateContent() {
   const searchParams = useSearchParams();
-    const [text, setText] = useState("");
-    const [appealPoint, setAppealPoint] = useState("");
-    const [imageUrl, setImageUrl] = useState("");
-    const [refUrl, setRefUrl] = useState("");
+  const [text, setText] = useState("");
+  const [appealPoint, setAppealPoint] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
+  const [refUrl, setRefUrl] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [results, setResults] = useState<CopyResult[]>([]);
@@ -40,46 +40,13 @@ function GenerateContent() {
   const { user, refreshUser } = useAuth();
   const router = useRouter();
 
-  // ID가 있을 경우 기존 데이터 로드
+  // 기존 히스토리 링크는 결과 전용 화면으로 리다이렉트
   useEffect(() => {
     const id = searchParams.get("id");
     if (id) {
-      setLoadingPhase(0);
-      setIsGenerating(true);
-      apiGet(`/generations/${id}`)
-        .then((data) => {
-          setGenId(data.id);
-          // 입력값 복원
-          if (data.input_config) {
-            setText(data.input_config.reference_copy || "");
-            setRefUrl(data.input_config.url || data.input_config.reference_url || "");
-            if (data.input_config.image_urls && data.input_config.image_urls.length > 0) {
-              setImageUrl(data.input_config.image_urls[0]);
-            }
-          }
-          // 결과값 복원
-          if (data.results && data.results.copies) {
-            setResults(
-              data.results.copies.map((c: any) => ({
-                ...c,
-                copy_text: c.copy_text || c.copy || c.text || "",
-                score: c.score || c.score_data?.mss_score_estimate || 0,
-                showRefine: false,
-                chatHistory: [{ role: "assistant", content: "무엇을 어떻게 수정할까요? (예: 더 재미있게 써줘)" }],
-                refineInput: "",
-                isRefining: false,
-              }))
-            );
-          }
-        })
-        .catch((err) => {
-          showToast("기록을 불러오지 못했습니다.", "error");
-        })
-        .finally(() => {
-          setIsGenerating(false);
-        });
+      router.replace(`/results/${id}`);
     }
-  }, [searchParams]);
+  }, [router, searchParams]);
 
   const isInputEmpty = !text.trim() && !imageUrl.trim() && !refUrl.trim();
 
@@ -124,21 +91,18 @@ function GenerateContent() {
 
       // 비동기 모드 (task_id 반환)
       if (response.task_id) {
-        const result = await pollTask(response.task_id, () => {});
-        const data = result as { copies: CopyResult[]; gen_id?: string; processing_time?: number };
-        setResults(
-          data.copies.map((c: CopyResult) => ({
-            ...c,
-            showRefine: false,
-            chatHistory: [{ role: "assistant", content: "무엇을 어떻게 수정할까요? (예: 더 재미있게 써줘)" }],
-            refineInput: "",
-            isRefining: false,
-          }))
-        );
-        if (data.gen_id) setGenId(data.gen_id);
+        await pollTask(response.task_id, () => {});
         showToast(`🔥 카피 완성!`);
+        router.push(`/results/${response.task_id}`);
+        return;
       } else {
         // 동기 모드
+        const nextGenId = response.gen_id || genId;
+        showToast(`🔥 카피 완성! (${response.processing_time}초)`);
+        if (nextGenId) {
+          router.push(`/results/${nextGenId}`);
+          return;
+        }
         setResults(
           response.copies.map((c: CopyResult) => ({
             ...c,
@@ -148,8 +112,6 @@ function GenerateContent() {
             isRefining: false,
           }))
         );
-        if (response.gen_id) setGenId(response.gen_id);
-        showToast(`🔥 카피 완성! (${response.processing_time}초)`);
       }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "알 수 없는 오류";
