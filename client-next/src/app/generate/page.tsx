@@ -31,7 +31,6 @@ function GenerateContent() {
   const [text, setText] = useState("");
   const [appealPoint, setAppealPoint] = useState("");
   const [imageUrl, setImageUrl] = useState("");
-  const [refUrl, setRefUrl] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [results, setResults] = useState<CopyResult[]>([]);
@@ -50,7 +49,7 @@ function GenerateContent() {
     }
   }, [router, searchParams]);
 
-  const isInputEmpty = !text.trim() && !imageUrl.trim() && !refUrl.trim();
+  const isInputEmpty = !text.trim() && !imageUrl.trim();
 
   const startLoadingAnimation = () => {
     setLoadingPhase(0);
@@ -86,7 +85,6 @@ function GenerateContent() {
         reference_copy: text.trim() ? text : null,
         appeal_point: appealPoint.trim() ? appealPoint : null,
         image_urls: imageUrl ? [imageUrl] : null,
-        reference_url: refUrl.trim() ? refUrl : null,
       };
 
       const response = await apiPost("/generate", reqBody);
@@ -120,7 +118,7 @@ function GenerateContent() {
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "알 수 없는 오류";
       showToast(`오류: ${msg}`, "error");
-      reportBug("GenerateError", msg, { text, imageUrl, refUrl });
+      reportBug("GenerateError", msg, { text, imageUrl });
     } finally {
       clearInterval(interval);
       setIsGenerating(false);
@@ -314,26 +312,6 @@ function GenerateContent() {
               />
             </div>
 
-            {/* 하단 URL 입력 필드 */}
-            <div className="relative mt-2">
-              <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} className="w-5 h-5 stroke-gray-500">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
-                </svg>
-              </div>
-              <input
-                value={refUrl}
-                onChange={(e) => setRefUrl(e.target.value)}
-                className="input-field text-sm py-4"
-                style={{ paddingLeft: '3rem' }}
-                placeholder="가져올 게시물 URL 입력 (선택)"
-              />
-              {refUrl && (
-                <p className="text-[10px] text-amber-400/80 mt-1 ml-2">
-                  ⚠️ URL 자동 분석은 점검 중입니다. 텍스트를 직접 입력하시면 더 정확한 결과가 나옵니다.
-                </p>
-              )}
-            </div>
           </div>
 
           <button
