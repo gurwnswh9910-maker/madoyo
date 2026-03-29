@@ -2,9 +2,13 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# .env 파일 로드 (프로젝트 루트 탐색)
-BASE_DIR = Path(__file__).parent.parent
+# .env 파일 로드 (현재 backend 폴더 기준)
+BASE_DIR = Path(__file__).resolve().parent
 env_path = BASE_DIR / '.env'
+# 만약 backend/.env가 없으면 상위 폴더(루트) 체크
+if not env_path.exists():
+    env_path = BASE_DIR.parent / '.env'
+
 if env_path.exists():
     load_dotenv(env_path)
 else:
@@ -22,6 +26,7 @@ class GlobalConfig:
     STORAGE_PATH = WORKING_CODE_DIR / "embeddings_v2_final.pkl"
     CACHE_PATH = BASE_DIR / "data_cache.pkl"
     PROCESSED_LOG_PATH = AUTOMATION_DIR / "processed_links.log"
+    MODEL_DIR = BASE_DIR / "embedding_migration"
 
     # 2. API 설정
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")

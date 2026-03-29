@@ -12,7 +12,9 @@ HURDLE_PATH = _MODEL_DIR / 'hurdle_model.pkl'
 
 class CopyScorerV4:
     def __init__(self):
-        print("🤖 [CopyScorer v4.3.1] 로컬 AI 엔진 로드 중...")
+        print(f"🤖 [CopyScorer v4.3.2] 로컬 AI 엔진 로드 중... (경로: {_MODEL_DIR})")
+        if not REG_PATH.exists():
+            print(f"❌ 오류: 모델 파일을 찾을 수 없습니다: {REG_PATH}")
         self.reg_model = joblib.load(REG_PATH)
         self.tour_model = joblib.load(TOUR_PATH)
         self.hurdle_model = joblib.load(HURDLE_PATH)
