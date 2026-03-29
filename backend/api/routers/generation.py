@@ -180,7 +180,7 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
                         user_id=u_id
                     )
                     formatted_copies = []
-                    for i, res in enumerate(results):
+                    for i, res in enumerate(results["copies"]):
                         formatted_copies.append({
                             "rank": i + 1,
                             "copy_text": res.get("copy", ""),
