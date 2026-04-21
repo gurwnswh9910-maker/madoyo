@@ -41,7 +41,7 @@ class GlobalConfig:
     EMBEDDING_MODEL = "models/gemini-embedding-2-preview"
 
     # 3. 성능 및 안정성 (마법의 숫자 제거)
-    MAX_WORKERS = 25
+    MAX_WORKERS = 10
     POST_INTERVAL = 15        # 포스팅 간 대기 시간 (초)
     FILE_API_POLL = 2         # Gemini File API 상태 체크 간격 (초)
     FILE_API_TIMEOUT = 60     # Gemini File API 처리 타임아웃 (초)

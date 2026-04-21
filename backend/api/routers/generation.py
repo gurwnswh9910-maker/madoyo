@@ -1,4 +1,4 @@
-﻿"""
+"""
 카피 생성 API 라우터.
 /api/generate — 카피 생성 메인 엔드포인트
 /api/refine   — 챗봇 카피 수정 엔드포인트
@@ -29,9 +29,18 @@ from api.schemas import (
     TaskResponse,
     TaskStatusResponse,
 )
-from api.config import GEMINI_API_KEY, MODEL_NAME, FALLBACK_MODEL_NAME, BASE_PATH, USE_CELERY, REWARD_COUNTDOWN_SEC
+from api.config import (
+    GEMINI_API_KEY,
+    MODEL_NAME,
+    FALLBACK_MODEL_NAME,
+    BASE_PATH,
+    USE_CELERY,
+    REWARD_COUNTDOWN_SEC,
+    BYPASS_GENERATION_CREDITS,
+)
 from api.logging_utils import build_error_payload, get_logger, log_event, preview_text
 from api.services.context_builder import build_context
+from benchmark_recorder import safe_sync_benchmark_record
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -92,20 +101,31 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
     log_event(logger, logging.INFO, "generate.request.received", **request_context)
     
     try:
-        # [MVP V7] 크레딧 체크 및 차감
         user = db.query(User).filter(User.id == current_user.id).first()
-        if not user or user.credits < 1:
-            raise HTTPException(status_code=403, detail="크레딧이 부족합니다. (필요: 1)")
-        
-        user.credits -= 1
-        db.commit()
-        log_event(
-            logger,
-            logging.INFO,
-            "generate.credits.deducted",
-            user_id=str(current_user.id),
-            remaining_credits=user.credits,
-        )
+        if not user:
+            raise HTTPException(status_code=404, detail="사용자 정보를 찾을 수 없습니다.")
+
+        if BYPASS_GENERATION_CREDITS:
+            log_event(
+                logger,
+                logging.INFO,
+                "generate.credits.bypassed",
+                user_id=str(current_user.id),
+                remaining_credits=user.credits,
+            )
+        else:
+            if user.credits < 1:
+                raise HTTPException(status_code=403, detail="크레딧이 부족합니다. (필요: 1)")
+
+            user.credits -= 1
+            db.commit()
+            log_event(
+                logger,
+                logging.INFO,
+                "generate.credits.deducted",
+                user_id=str(current_user.id),
+                remaining_credits=user.credits,
+            )
 
         # Step 1: 비동기 태스크 호출 (스크래핑/분석 포함)
         if USE_CELERY:
@@ -177,7 +197,7 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
                 original_copy = req.reference_copy or ""
                 log_event(logger, logging.INFO, "generate.task.started", task_id=t_id, user_id=u_id)
                 
-                print("🚀 [클라우드 전용 아키텍처] 무조건 Supabase DB 네이티브 가동 (optimize_copy_online)")
+                print("[Cloud Native Architecture] Always Supabase DB Native (optimize_copy_online)")
                 from optimize_copy_online import run_optimization_online as run_optimized_engine
                 
                 try:
@@ -234,9 +254,11 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
                     results = run_optimized_engine(
                         original_copy=original_copy,
                         product_focus=product_focus,
+                        input_image_urls=req.image_urls,
                         api_key=api_key,
                         model_name=m_name,
-                        user_id=u_id
+                        user_id=u_id,
+                        task_id=t_id,
                     )
                     log_event(
                         logger,
@@ -267,7 +289,8 @@ def generate_copy(request: GenerateRequest, background_tasks: BackgroundTasks, c
                         gen_record.results = {
                             "copies": formatted_copies,
                             "original_rank": results.get("original_rank", -1),
-                            "total_candidates": results.get("total_candidates", 0)
+                            "total_candidates": results.get("total_candidates", 0),
+                            "benchmark_record_path": results.get("benchmark_record_path", ""),
                         }
                         _db.commit()
                     log_event(
@@ -458,6 +481,7 @@ def get_generation_detail(gen_id: str, current_user=Depends(get_current_user)):
 from pydantic import BaseModel
 class SubmitUrlRequest(BaseModel):
     url: str
+    published_rank: int = 1
 
 @router.post("/generations/{gen_id}/submit-url")
 def submit_feedback_url(gen_id: str, req: SubmitUrlRequest):
@@ -484,10 +508,15 @@ def submit_feedback_url(gen_id: str, req: SubmitUrlRequest):
             db.add(feedback)
 
         feedback.published_url = req.url
+        feedback.performance = {
+            **(feedback.performance or {}),
+            "published_rank": req.published_rank,
+        }
         feedback.status = "completed" # [MVP V7] 즉시 완료 처리
         feedback.scheduled_at = datetime.utcnow()
         feedback.reward_credits = 2
         
+        benchmark_record_path = ""
         # [MVP V7] 즉시 크레딧 지급
         from api.database import User, Generation
         gen = db.query(Generation).filter(Generation.id == gen_id).first()
@@ -495,8 +524,26 @@ def submit_feedback_url(gen_id: str, req: SubmitUrlRequest):
             user = db.query(User).filter(User.id == gen.user_id).first()
             if user:
                 user.credits += 2
+        if gen and isinstance(gen.results, dict):
+            benchmark_record_path = gen.results.get("benchmark_record_path", "")
         
         db.commit()
+
+        safe_sync_benchmark_record(
+            benchmark_record_path,
+            patch={
+                "published_url": req.url,
+                "published_rank": req.published_rank,
+                "label_state": "published_linked",
+            },
+            event={
+                "event_type": "published_url_submitted",
+                "published_url": req.url,
+                "published_rank": req.published_rank,
+                "generation_id": gen_id,
+            },
+            context="generation.submit_feedback_url",
+        )
 
         return {
             "status": "success",
@@ -554,10 +601,16 @@ def process_due_rewards(background_tasks: BackgroundTasks):
 
             _db = SessionLocal()
             emb_mgr = EmbeddingManager()
+            def _get_benchmark_record_path(target_gid):
+                gen_row = _db.query(Generation).filter(Generation.id == target_gid).first()
+                if gen_row and isinstance(gen_row.results, dict):
+                    return gen_row.results.get("benchmark_record_path", "")
+                return ""
             try:
                 for gid in gen_ids:
                     feedback = _db.query(MABFeedback).filter(MABFeedback.gen_id == gid).first()
                     if not feedback: continue
+                    benchmark_record_path = _get_benchmark_record_path(gid)
                     
                     # ══════════════════════════════════════════════════════════
                     # [Phase 1: pending] 성과 수집 및 Gemini File API 업로드
@@ -575,8 +628,10 @@ def process_due_rewards(background_tasks: BackgroundTasks):
 
                             mss = calculate_mss_from_metrics(data)
                             content_text = data["content_text"]
-                            
+                            existing_perf = feedback.performance or {}
+
                             performance_data = {
+                                **existing_perf,
                                 "본문": content_text,
                                 "조회수": data["views"],
                                 "좋아요": data["likes"],
@@ -598,11 +653,33 @@ def process_due_rewards(background_tasks: BackgroundTasks):
                                     if temp_path:
                                         file_obj = emb_mgr.upload_to_gemini_file_api(temp_path)
                                         if file_obj:
-                                            file_api_info = {"name": file_obj.name, "uri": file_obj.uri}
+                                            file_api_info = {
+                                                "name": file_obj.name,
+                                                "uri": file_obj.uri,
+                                                "mime_type": file_obj.mime_type,
+                                            }
                                         if is_temp: os.remove(temp_path)
 
                             performance_data["file_api"] = file_api_info
                             feedback.performance = performance_data
+                            safe_sync_benchmark_record(
+                                benchmark_record_path,
+                                patch={
+                                    "published_post": {
+                                        "url": feedback.published_url,
+                                        "content_text": content_text,
+                                        "metrics": performance_data,
+                                    },
+                                    "label_state": "performance_staged",
+                                },
+                                event={
+                                    "event_type": "performance_staged",
+                                    "generation_id": str(gid),
+                                    "published_url": feedback.published_url,
+                                    "mss_score": mss,
+                                },
+                                context="generation.process_rewards.stage1",
+                            )
                             
                             # ✅ 1시간 유예 상태로 전이
                             feedback.status = "staged"
@@ -627,14 +704,24 @@ def process_due_rewards(background_tasks: BackgroundTasks):
                             file_info = perf.get("file_api", {})
                             file_uri = file_info.get("uri")
                             file_name = file_info.get("name")
+                            file_mime_type = file_info.get("mime_type")
                             content_text = perf.get("본문")
                             mss = perf.get("mss_score", 0.0)
 
                             if IS_ONLINE and file_uri:
                                 # 트리플 벡터 동시 생성
                                 text_vec = emb_mgr.get_text_embedding(text=content_text, use_db=False)
-                                visual_vec = emb_mgr.get_multimodal_embedding(file_uri=file_uri, use_db=False)
-                                joint_vec = emb_mgr.get_multimodal_embedding(text=content_text, file_uri=file_uri, use_db=False)
+                                visual_vec = emb_mgr.get_multimodal_embedding(
+                                    file_uri=file_uri,
+                                    file_mime_type=file_mime_type,
+                                    use_db=False,
+                                )
+                                joint_vec = emb_mgr.get_multimodal_embedding(
+                                    text=content_text,
+                                    file_uri=file_uri,
+                                    file_mime_type=file_mime_type,
+                                    use_db=False,
+                                )
                                 
                                 if text_vec is not None and visual_vec is not None and joint_vec is not None:
                                     # ✅ [무결성 검증] 텍스트 벡터와 조인트 벡터가 유의미하게 다른지 자체 체크
@@ -692,6 +779,24 @@ def process_due_rewards(background_tasks: BackgroundTasks):
                                 user = _db.query(User).filter(User.id == gen.user_id).first()
                                 if user: user.credits += 2
                             _db.commit()
+                            safe_sync_benchmark_record(
+                                benchmark_record_path,
+                                patch={
+                                    "published_post": {
+                                        "url": feedback.published_url,
+                                        "content_text": content_text,
+                                        "metrics": perf,
+                                    },
+                                    "label_state": "performance_completed",
+                                },
+                                event={
+                                    "event_type": "performance_completed",
+                                    "generation_id": str(gid),
+                                    "published_url": feedback.published_url,
+                                    "mss_score": mss,
+                                },
+                                context="generation.process_rewards.stage2",
+                            )
                             print(f"[Reward Phase 2] 🏁 보상 지급 완료 및 파일 정리 성공.")
 
                         except Exception as e:

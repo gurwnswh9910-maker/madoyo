@@ -6,6 +6,12 @@
 !/backend/**
 !/client-next/
 !/client-next/**
+!/knowledge_base/
+!/knowledge_base/L1-Maps/
+!/knowledge_base/L1-Maps/copy_scorer_research_hub.md
+!/knowledge_base/L2-Atomic/
+!/knowledge_base/L2-Atomic/engines/
+!/knowledge_base/L2-Atomic/engines/benchmark_record_flow.md
 !/render.yaml
 !/.gitignore
 !/backend/embedding_migration/*.pkl
@@ -17,6 +23,15 @@ backend/.venv
 backend/__pycache__/
 backend/*.pyc
 backend/*.pyo
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/**/*.pyo
+backend/temp_uploads/
+backend/media/
+backend/*.log
+backend/*.err
+backend/*.out
+backend/test_results_v9.log
 
 # --- Client 무시 ---
 client-next/.env

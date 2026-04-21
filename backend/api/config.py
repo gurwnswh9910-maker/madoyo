@@ -22,7 +22,7 @@ else:
 # API 및 시스템 설정
 # ════════════════════════════════════════════════════════════════
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-MODEL_NAME = "gemini-3-flash-preview"
+MODEL_NAME = "models/gemini-3-flash-preview"
 FALLBACK_MODEL_NAME = "gemini-2.5-flash"
 EMBEDDING_MODEL = "gemini-embedding-001"
 
@@ -67,6 +67,9 @@ PAYAPP_WEBHOOK_URL = os.getenv("PAYAPP_WEBHOOK_URL", "https://api.snapthread.sit
 
 # 보상 검증 대기 시간 (초) — 프로덕션: 86400 (24시간), 테스트: 30
 REWARD_COUNTDOWN_SEC = int(os.getenv("REWARD_COUNTDOWN_SEC", "86400"))
+
+# 개발 중 생성 크레딧 우회가 필요할 때만 명시적으로 활성화
+BYPASS_GENERATION_CREDITS = os.getenv("BYPASS_GENERATION_CREDITS", "false").lower() == "true"
 
 # 미디어 업로드 최대 크기 (MB)
 MEDIA_MAX_SIZE_MB = int(os.getenv("MEDIA_MAX_SIZE_MB", "10"))

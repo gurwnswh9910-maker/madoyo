@@ -60,10 +60,13 @@ class ContrastivePrompter:
             lines.append(f"✅ (MSS {m['mss_score']:.0f}) {preview}")
         return "\n".join(lines)
 
-    def _find_dynamic_contrastive_pair(self, high_post_text, high_mss):
+    def _find_dynamic_contrastive_pair(self, high_post_text, high_mss, high_emb=None):
         if self.emb_mgr is None or high_post_text is None: return None, None
-        input_emb = self.emb_mgr.get_text_embedding(high_post_text)
+
+        # Reuse existing embedding if available to save API calls
+        input_emb = high_emb if high_emb is not None else self.emb_mgr.get_text_embedding(high_post_text)
         if input_emb is None: return None, None
+
         low_mss_threshold = high_mss * 0.7
         db: Session = SessionLocal()
         try:
@@ -74,7 +77,10 @@ class ContrastivePrompter:
                 ORDER BY (embedding <=> CAST(:vec AS vector)) ASC
                 LIMIT 1
             """)
-            result = db.execute(query, {"vec": input_emb.tolist(), "mss_limit": low_mss_threshold, "orig": high_post_text}).first()
+            result = db.execute(
+                query,
+                {"vec": input_emb.tolist(), "mss_limit": low_mss_threshold, "orig": high_post_text},
+            ).first()
             if result and result.sim > 0.6: return result.content_text, result.mss_score
             return None, None
         except Exception as e:

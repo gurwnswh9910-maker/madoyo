@@ -169,14 +169,14 @@ def extract_marketing_focus(client: genai.Client, model_name: str, product_name:
             objective = product_name
             insight = full_text
 
-        print(f"    ✅ 분석 완료 ({time.time() - start_time:.1f}초)")
+        print(f"    OK 분석 완료 ({time.time() - start_time:.1f}초)")
         print(f"      - 객관적 묘사: {objective[:40]}...")
         print(f"      - 마케팅 인사이트: {insight[:40]}...")
 
         return {"objective_description": objective, "marketing_insight": insight}
 
     except Exception as e:
-        print(f"    ❌ 마케팅 소구점 추출 실패: {e}")
+        print(f"    [ERR] 마케팅 소구점 추출 실패: {e}")
         return {"objective_description": product_name, "marketing_insight": "마케팅 분석 실패"}
     finally:
         # 로컬 임시 파일 삭제

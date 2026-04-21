@@ -59,9 +59,9 @@ async def startup_event():
         db.execute(text("ALTER TABLE mab_feedback_loop ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMP;"))
         db.commit()
         db.close()
-        print("✅ DB Migration: scheduled_at column OK")
+        print("DB Migration: scheduled_at column OK")
     except Exception as e:
-        print(f"⚠️ Startup DB Migration skipped: {e}")
+        print(f"Startup DB Migration skipped: {e}")
 
 
 # ════════════════════════════════════════════════════════════════

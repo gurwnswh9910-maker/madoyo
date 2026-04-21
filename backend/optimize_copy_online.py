@@ -14,10 +14,11 @@ from typing import List, Dict, Any
 from google import genai
 
 from embedding_utils_online import EmbeddingManager
+from benchmark_recorder import write_benchmark_record
 from contrastive_prompter_online import ContrastivePrompter
 from copy_generator_v2 import DynamicCopyGenerator
-from copy_scorer_v5_online import CopyScorerV5
-from api.config import STATIC_STRATEGIES
+from copy_scorer_v4_highlow_online import CopyScorerV4HighLowOnline
+from api.config import STATIC_STRATEGIES, MODEL_NAME
 from api.logging_utils import get_logger, log_event, preview_text
 
 
@@ -101,7 +102,7 @@ def generate_single_task(client, model, task):
             except Exception as e:
                 if "429" in str(e) and attempt == 0:
                     log_event(logger, logging.WARNING, "optimize.generate_single.retry_429", cid=cid, attempt=attempt + 1)
-                    time.sleep(10)
+                    time.sleep(1.0)
                     continue
                 raise e
     except Exception as e:
@@ -128,7 +129,7 @@ def extract_dynamic_all(client, model, product_info, pairs, static_strats=None):
             pairs_context += f"  ❌ LOW  (MSS {p.get('low_mss', 0):.0f}): {l_preview}\n"
 
     prompt = f"""당신은 10년차 탑 바이럴 마케터입니다.
-아래는 '{product_info}'와 유사한 카테고리에서 작성된 {len(pairs)}개의 고성과/저성과 게시물 쌍(Pair)입니다. 
+아래는 '{product_info}'와 유사한 카테고리에서 작성된 {len(pairs)}개의 고성과/저성과 게시물 쌍(Pair)입니다.
 
 {pairs_context}
 {static_context}
@@ -177,16 +178,16 @@ def run_optimization_online(
     task_id: str = None,
 ):
     """[ONLINE VERSION] SQL(pgvector) 기반 실시간 하이브리드 카피 최적화 엔진"""
-    
+
     print(f"\n{'='*80}")
-    print(f"🚀 [ONLINE ENGINE] MAB 하이브리드 최적화 시스템 v4.1 (SQL Native)")
+    print(f"   [ONLINE ENGINE] MAB Hybrid Optimization System v4.1 (SQL Native)")
     print(f"모드: {'멀티모달' if input_image_urls else '텍스트 전용'}")
     print(f"{'='*80}")
-    
+
     t_start = time.time()
     client = genai.Client(api_key=api_key)
-    MODEL = model_name
-    
+    MODEL = model_name or MODEL_NAME
+
     if shared_resources is None: shared_resources = {}
     target_img = input_image_urls[0] if input_image_urls else None
     log_event(
@@ -198,7 +199,7 @@ def run_optimization_online(
         mode="multimodal" if input_image_urls else "text",
         original_copy_preview=preview_text(original_copy, limit=80),
     )
-    
+
     # ══════════════════════════════════════════════════════════════
     # 1. SQL 기반 임베딩 매니저 & 스코어러 로드
     # ══════════════════════════════════════════════════════════════
@@ -206,38 +207,53 @@ def run_optimization_online(
     if not emb_mgr:
         emb_mgr = EmbeddingManager()
         shared_resources['emb_mgr'] = emb_mgr
-    
+
     scorer = shared_resources.get('scorer')
     if not scorer:
-        # 512MB 램 제한을 위해 내부 GC 통제 버전
-        scorer = CopyScorerV5()
+        print("   [Engine] Initializing CopyScorerV4HighLowOnline (promoted default)...")
+        scorer = CopyScorerV4HighLowOnline()
         shared_resources['scorer'] = scorer
-    
+    print("   [Engine] Scorer ready. Starting RAG Retrieval phase.")
+
     # ══════════════════════════════════════════════════════════════
     # 2. 하이브리드 회수 (Online SQL Retrieval)
     # ══════════════════════════════════════════════════════════════
-    print(f"\n2. SQL 하이브리드 회수 중 (pgvector)...")
-    
+    print(f"\n2. SQL Hybrid Retrieval (pgvector) in progress...")
+
     query_vec = None
+    search_type = "multi"
+
     if original_copy and input_image_urls:
+        print(f"   [Search Mode] Hybrid (Text + Media)")
+        search_type = "multi"
         query_vec = emb_mgr.get_multimodal_embedding(text=original_copy, image_paths_or_urls=input_image_urls)
     elif input_image_urls:
+        print(f"   [Search Mode] Media Only")
+        search_type = "visual"
         query_vec = emb_mgr.get_multimodal_embedding(image_paths_or_urls=input_image_urls)
     else:
+        print(f"   [Search Mode] Text Only")
+        search_type = "text"
         query_vec = emb_mgr.get_text_embedding(original_copy)
 
     filtered_subset = pd.DataFrame(columns=['본문', 'MSS', 'alpha_score'])
     if query_vec is not None:
-        results = emb_mgr.get_hybrid_top_k(query_vec, k=100, alpha=0.3)
+        # Optimization: retrieve candidates, but filter by similarity threshold (0.6)
+        results = [r for r in emb_mgr.get_hybrid_top_k(query_vec, k=5, alpha=0.3, embedding_type=search_type) if r.get('similarity', 0) > 0.6]
         if results:
             filtered_subset = pd.DataFrame(results)
             filtered_subset = filtered_subset.rename(columns={
                 'content_text': '본문', 'mss_score': 'MSS', 'similarity': 'alpha_score'
             })
-            print(f"   ✅ [SQL] {len(filtered_subset)}개 데이터 확보 완료")
+            print(f"   OK [SQL] {search_type} type top {len(filtered_subset)} items secured")
+
+            # --- Detailed Candidate Logging ---
+            print(f"   [RAG Results] Retrieved Top 5:")
+            for i, row in filtered_subset.iterrows():
+                print(f"      ({i+1}) [MSS {row['MSS']:.1f}] {row['본문'][:60]}...")
 
     if filtered_subset.empty:
-        print("   ⚠️ 회수된 데이터가 없습니다. 빈 결과를 반환합니다.")
+        print("   [WARN] No data retrieved. Returning empty results.")
         log_event(logger, logging.WARNING, "optimize.retrieval.empty", task_id=task_id)
         return {
             "copies": [],
@@ -252,20 +268,20 @@ def run_optimization_online(
         task_id=task_id,
         retrieved_count=len(filtered_subset),
     )
-    best_similar_posts = filtered_subset.head(10)
-    top_examples_for_gen = best_similar_posts[['본문', 'MSS']].to_dict('records')
-    
+    # Use all retrieved candidates (which is 5) for few-shot generation
+    top_examples_for_gen = filtered_subset[['본문', 'MSS']].to_dict('records')
+
     generator = DynamicCopyGenerator(top_examples_for_gen)
     contrastive = ContrastivePrompter(embedding_manager=emb_mgr)
-    
+
     # ══════════════════════════════════════════════════════════════
     # 3. 원본 채점 + 대조쌍 추출 + 전략 도출 + 카피 생성 (Pipeline)
     # ══════════════════════════════════════════════════════════════
     print(f"\n3. 전략 추출 및 카피 생성 시작...")
-    
+
     # 원본 수집 준비
     orig_vec = query_vec if query_vec is not None else np.zeros(3072)
-    
+
     scored = [{
         "success": True,
         "cid": "Original",
@@ -273,33 +289,36 @@ def run_optimization_online(
         "strategy": "원본",
         "embedding": orig_vec
     }]
-    
+
     # 대조쌍 추출 (SQL 기반)
     dynamic_pairs = []
-    for _, row in best_similar_posts.head(5).iterrows():
-        low_text, low_mss = contrastive._find_dynamic_contrastive_pair(row['본문'], row['MSS'])
+    for _, row in filtered_subset.head(5).iterrows():
+        # Pass the pre-computed embedding to save one API call per candidate
+        low_text, low_mss = contrastive._find_dynamic_contrastive_pair(
+            row['본문'], row['MSS'], high_emb=row.get('embedding')
+        )
         if low_text:
             dynamic_pairs.append({
                 'high_text': row['본문'], 'high_mss': row['MSS'],
                 'low_text': low_text, 'low_mss': low_mss
             })
-    
+
     print(f"   📊 대조쌍 {len(dynamic_pairs)}개 확보")
-    
+
     # 병렬 실행: 동적 전략 추출 + 정적 전략 카피 생성
     log_event(logger, logging.INFO, "optimize.contrastive_pairs.ready", task_id=task_id, pair_count=len(dynamic_pairs))
-    MAX_WORKERS = 15
+    MAX_WORKERS = 3
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         # 동적 전략 추출 (비동기)
         strat_future = executor.submit(
             extract_dynamic_all, client, MODEL, product_focus, dynamic_pairs, STATIC_STRATEGIES
         )
-        
+
         generation_futures = {}
-        
+
         def push_tasks(strat_list, start_idx_offset=0):
             for s_idx, (name, desc) in enumerate(strat_list):
-                num = 4 if "동적" in name or "하이브리드" in name else 2
+                num = 4 if "동적" in name or "하이브리드" in name else 3
                 for v_idx in range(num):
                     cid = f"DYN_{s_idx}_{v_idx}" if num > 2 else f"S_{s_idx+start_idx_offset}_{v_idx}"
                     prompt = generator.generate_prompt(
@@ -309,10 +328,10 @@ def run_optimization_online(
                     task = {"cid": cid, "prompt": prompt, "strat_label": name}
                     fut = executor.submit(generate_single_task, client, MODEL, task)
                     generation_futures[fut] = task
-        
+
         # 정적 전략 먼저 투입
         push_tasks(STATIC_STRATEGIES, start_idx_offset=10)
-        
+
         dynamic_done = False
         while len(generation_futures) > 0 or not dynamic_done:
             # 동적 전략 결과 수신 시 추가 투입
@@ -329,7 +348,7 @@ def run_optimization_online(
                     if res_c: d_strats.append((f"[하이브리드C] {res_c[0]}", res_c[1]))
                     push_tasks(d_strats, start_idx_offset=0)
                     print(f"   🎯 동적 전략 {len(d_strats)}개 주입 완료")
-            
+
             done_futs, _ = concurrent.futures.wait(
                 generation_futures.keys(), timeout=0.1,
                 return_when=concurrent.futures.FIRST_COMPLETED
@@ -349,19 +368,19 @@ def run_optimization_online(
                     if res["success"]:
                         for i, t_copy in enumerate(res["copies"]):
                             t_copy = clean_marketing_text(t_copy)
-                            time.sleep(1.5)
-                            
+
+                            print(f"   [Engine] Extracting embedding for candidate: {preview_text(t_copy, limit=50)}")
                             if target_img:
                                 c_vec = emb_mgr.get_multimodal_embedding(
                                     text=t_copy, image_paths_or_urls=[target_img]
                                 )
                             else:
                                 c_vec = emb_mgr.get_text_embedding(t_copy)
-                            
+
                             if c_vec is None:
                                 print(f"    ⚠️  [{res['cid']}] 임베딩 실패. 스킵.")
                                 continue
-                            
+
                             c_suffix = "_A" if i == 0 else "_B"
                             item = {
                                 "cid": res["cid"] + c_suffix,
@@ -373,25 +392,25 @@ def run_optimization_online(
                             print(f"   ✅ [{res['cid']+c_suffix:>8}] 후보군 추가 완료 | {t_copy[:30]}...")
                     else:
                         print(f"   ❌ [{res['cid']}] 생성 실패: {res.get('error', 'unknown')}")
-            
+
             if not generation_futures and dynamic_done:
                 break
-    
+
     # ══════════════════════════════════════════════════════════════
     # 4. [V16] 98% 정확도 ML 리그전 통합 채점
     # ══════════════════════════════════════════════════════════════
     print(f"\n4. [V5 엔진] 생성된 {len(scored)}개 카피 전원 ML 리그전 채점 중...")
-    
+
     candidates_data = [{"text": c["copy"], "embedding": c["embedding"]} for c in scored]
     orig_idx = next((i for i, c in enumerate(scored) if c["cid"] == "Original"), 0)
-    
+
     try:
         scoring_results = scorer.score_candidates(candidates_data, orig_index=orig_idx)
     except Exception as e:
         print(f"    ⚠️ 채점 실패. 에러: {e}")
         logger.exception("optimize.scoring.failed | task_id=%r candidate_count=%r", task_id, len(candidates_data))
         scoring_results = []
-    
+
     for rank_meta in scoring_results:
         idx = rank_meta['index']
         scored[idx]["total_score"] = rank_meta['total_score']
@@ -402,10 +421,56 @@ def run_optimization_online(
             "pass_hurdle": rank_meta['pass_hurdle'],
             "league_wins": rank_meta['league_wins']
         }
-        
+
     scored = sorted(scored, key=lambda x: x.get('total_score', 0), reverse=True)
-    
+
     orig_rank = next((i+1 for i, item in enumerate(scored) if item['cid'] == 'Original'), -1)
+    benchmark_record_path = ""
+    try:
+        candidate_records = []
+        for rank, item in enumerate(scored, 1):
+            score_data = item.get("score_data", {})
+            candidate_records.append(
+                {
+                    "rank": rank,
+                    "cid": item.get("cid"),
+                    "is_original": item.get("cid") == "Original",
+                    "copy": item.get("copy", ""),
+                    "strategy": item.get("strategy", ""),
+                    "total_score": item.get("total_score", 0),
+                    "reg_score": score_data.get("reg_score"),
+                    "hurdle_prob": score_data.get("hurdle_prob"),
+                    "pass_hurdle": score_data.get("pass_hurdle"),
+                    "league_wins": score_data.get("league_wins"),
+                }
+            )
+
+        benchmark_record_path = write_benchmark_record(
+            {
+                "task_id": task_id,
+                "user_id": user_id,
+                "mode": "multimodal" if input_image_urls else "text",
+                "input_image_urls": input_image_urls or [],
+                "original_copy": original_copy,
+                "product_focus": product_focus,
+                "original_rank": orig_rank,
+                "total_candidates": len(scored),
+                "top_candidate_cids": [item.get("cid") for item in scored[:3]],
+                "candidates": candidate_records,
+            },
+            run_id=task_id,
+        )
+        log_event(
+            logger,
+            logging.INFO,
+            "optimize.benchmark_record.written",
+            task_id=task_id,
+            record_path=benchmark_record_path,
+            candidate_count=len(candidate_records),
+        )
+    except Exception:
+        logger.exception("optimize.benchmark_record.failed | task_id=%r", task_id)
+
     log_event(
         logger,
         logging.INFO,
@@ -418,10 +483,11 @@ def run_optimization_online(
     )
     print(f"\n📊 [성과 벤치마크] ML 원본 순위: {orig_rank}위 / {len(scored)}개 중")
     print(f"🏁 최적화 완료! (총 {len(scored)}개 분석, 소요시간: {time.time()-t_start:.1f}초)")
-    
+
     final_top_3 = [s for s in scored if 'score_data' in s][:3]
     return {
         "copies": final_top_3,
         "original_rank": orig_rank,
-        "total_candidates": len(scored)
+        "total_candidates": len(scored),
+        "benchmark_record_path": benchmark_record_path,
     }

@@ -8,6 +8,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from google import genai
 from google.genai import types
+from api.database import SessionLocal, engine
 from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
@@ -23,22 +24,23 @@ class EmbeddingManager:
     """[ONLINE VERSION] SQL pgvector 및 Supabase Storage 전용 매니저"""
     def __init__(self, storage_path=None):
         self.api_key = GlobalConfig.GEMINI_API_KEY
-        self.model_id = GlobalConfig.EMBEDDING_MODEL 
+        self.model_id = GlobalConfig.EMBEDDING_MODEL
         self.db_url = os.getenv("DATABASE_URL")
         self.supabase_url = os.getenv("SUPABASE_URL")
         self.supabase_key = os.getenv("SUPABASE_ANON_KEY")
-        
+
         print(f"🚀 [EmbeddingManager v7.0-ONLINE] Initialized with model: {self.model_id}")
-        
+
         if self.api_key:
             self.client = genai.Client(api_key=self.api_key)
         else:
             self.client = None
-            
-        self._file_cache = {} 
+
+        self._file_cache = {}
 
     def _get_db_conn(self):
-        return psycopg2.connect(self.db_url)
+        # Use SQLAlchemy engine's pool to avoid expensive SSL handshake on every search
+        return engine.raw_connection()
 
     def save_to_db(self, content_text, embedding, embedding_type="multi", mss_score=0.0, is_global=True, metadata=None):
         """DB에 임베딩 및 메타데이터 저장"""
@@ -48,8 +50,8 @@ class EmbeddingManager:
             # content_text, embedding_type 복합키 제약조건에 따른 UPSERT
             cur.execute(
                 """
-                INSERT INTO mab_embeddings (content_text, embedding_type, embedding, mss_score, is_global, metadata_json) 
-                VALUES (%s, %s, %s, %s, %s, %s) 
+                INSERT INTO mab_embeddings (content_text, embedding_type, embedding, mss_score, is_global, metadata_json)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (content_text, embedding_type) DO NOTHING
                 """,
                 (content_text, embedding_type, embedding.tolist() if isinstance(embedding, np.ndarray) else embedding, mss_score, is_global, json.dumps(metadata or {}))
@@ -84,21 +86,21 @@ class EmbeddingManager:
         """이미지를 Supabase Storage에 업로드하고 Public URL 반환"""
         if not self.supabase_url or not self.supabase_key:
             return None
-        
+
         with open(file_path, "rb") as f:
             content = f.read()
             f_hash = hashlib.md5(content).hexdigest()
-        
+
         file_name = f"{f_hash}.jpg"
         upload_url = f"{self.supabase_url}/storage/v1/object/{bucket_name}/{file_name}"
-        
+
         headers = {
             "Authorization": f"Bearer {self.supabase_key}",
             "apikey": self.supabase_key,
             "Content-Type": "image/jpeg"
         }
         r = requests.post(upload_url, headers=headers, data=content)
-            
+
         if r.status_code in [200, 201, 409]: # 409: Already exists
             return f"{self.supabase_url}/storage/v1/object/public/{bucket_name}/{file_name}"
         return None
@@ -145,9 +147,9 @@ class EmbeddingManager:
         return path_or_url, False
 
     @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception(_is_retriable), reraise=True)
-    def get_multimodal_embedding(self, text=None, image_paths_or_urls=None, file_uri=None, use_db=True):
+    def get_multimodal_embedding(self, text=None, image_paths_or_urls=None, file_uri=None, file_mime_type=None, use_db=True):
         if not text and not image_paths_or_urls and not file_uri: return None
-        
+
         # SQL 기반 캐시 조회 (텍스트 Only인 경우만)
         if use_db and text and not image_paths_or_urls and not file_uri:
             conn = self._get_db_conn()
@@ -163,14 +165,15 @@ class EmbeddingManager:
 
         parts = []
         if text: parts.append(text)
-        
+
         temp_file = None
         is_temp = False
-        
+
         # Case A: Gemini File API URI 사용 (지연 임베딩용)
         if file_uri:
-            parts.append(types.Part.from_uri(uri=file_uri, mime_type="image/jpeg"))
-        
+            mime_type = file_mime_type or "image/jpeg"
+            parts.append(types.Part.from_uri(file_uri=file_uri, mime_type=mime_type))
+
         # Case B: 로컬 경로 또는 URL 사용 (즉시 임베딩용)
         elif image_paths_or_urls:
             target = image_paths_or_urls[0] if isinstance(image_paths_or_urls, list) else image_paths_or_urls
@@ -215,19 +218,28 @@ class EmbeddingManager:
     def get_hybrid_top_k(self, query_vec, k=100, alpha=0.3, embedding_type="multi"):
         """[CORE] SQL pgvector를 사용한 실시간 하이브리드 회수"""
         if query_vec is None: return []
+        print(f"   [RAG Query] Type={embedding_type}, Dim={len(query_vec)}")
         conn = self._get_db_conn()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         try:
+            # Optimization: Allow some cross-type retrieval for more candidates
+            if embedding_type == "multi":
+                type_filter = ("multi", "text", "visual")
+            else:
+                type_filter = (embedding_type, "multi")
+
             query = """
-                SELECT content_text, mss_score, metadata_json,
+                SELECT content_text, mss_score, metadata_json, embedding,
                        (1 - (embedding <=> %s::vector)) as similarity
                 FROM mab_embeddings
-                WHERE embedding_type = %s
+                WHERE embedding_type IN %s
                 ORDER BY ((1 - (embedding <=> %s::vector)) * %s) + (mss_score / 100.0 * %s) DESC
                 LIMIT %s
             """
-            cur.execute(query, (query_vec.tolist(), embedding_type, query_vec.tolist(), alpha, 1-alpha, k))
-            return cur.fetchall()
+            cur.execute(query, (query_vec.tolist(), type_filter, query_vec.tolist(), alpha, 1-alpha, k))
+            rows = cur.fetchall()
+            print(f"   [SQL Result] Found {len(rows)} matching candidates in DB.")
+            return rows
         finally:
             cur.close()
             conn.close()

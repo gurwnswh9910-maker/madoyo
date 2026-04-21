@@ -11,234 +11,190 @@ import numpy as np
 from app_config import GlobalConfig
 from api.logging_utils import get_logger, log_event
 
-
 CandidateData = Dict[str, Any]
 ScoreResult = Dict[str, Any]
 logger = get_logger(__name__)
 
-
 class CopyScorerV5:
-    """Online ML scorer for ranking generated copy candidates."""
+    """
+    [V5 Online Engine] Synchronized with '3072 + 15' Full Force Logic.
+    NO PCA. Raw Embedding (3072) + 15 Meta Features = 3087 Dimensions.
+    """
 
     EMBEDDING_DIM = 3072
-    META_FEATURE_DIM = 9
-    FEATURE_DIM = EMBEDDING_DIM + META_FEATURE_DIM
-    LEAGUE_SIZE = 5
-    HURDLE_PASS_THRESHOLD = 0.5
-    WILDCARD_THRESHOLD = 0.9
+    LEAGUE_SIZE = 40
 
     def __init__(self, use_supabase: bool = False, supabase_url: str = ""):
-        del use_supabase, supabase_url
-
-        os.makedirs(GlobalConfig.MODEL_DIR, exist_ok=True)
-        self.files = {
-            "reg": os.path.join(GlobalConfig.MODEL_DIR, "viral_model.pkl"),
-            "tour": os.path.join(GlobalConfig.MODEL_DIR, "tournament_model.pkl"),
-            "hurdle": os.path.join(GlobalConfig.MODEL_DIR, "hurdle_model.pkl"),
-        }
-
-        log_event(logger, logging.INFO, "copy_scorer.models.loading", model_dir=str(GlobalConfig.MODEL_DIR))
-
-        if not os.path.exists(self.files["tour"]):
-            log_event(logger, logging.WARNING, "copy_scorer.models.missing", missing_key="tour")
-
-        self.reg_model = joblib.load(self.files["reg"])
-        self.hurdle_model = joblib.load(self.files["hurdle"])
-        self.tour_model = joblib.load(self.files["tour"])
-        log_event(logger, logging.INFO, "copy_scorer.models.loaded", file_count=len(self.files))
-
-    def _extract_meta_features(self, text: str, dt: Optional[datetime] = None) -> np.ndarray:
-        if dt is None:
-            dt = datetime.now()
-
-        day_sin = np.sin(2 * np.pi * dt.weekday() / 7)
-        day_cos = np.cos(2 * np.pi * dt.weekday() / 7)
-        hour_sin = np.sin(2 * np.pi * dt.hour / 24)
-        hour_cos = np.cos(2 * np.pi * dt.hour / 24)
-
-        if not isinstance(text, str):
-            style = [0, 0, 0, 0]
-            text_length = 0
-        else:
-            emoji_count = len(re.findall(r"[^\w\s,]", text))
-            line_count = text.count("\n")
-            question_count = text.count("?")
-            exclamation_count = text.count("!")
-            style = [emoji_count, line_count, question_count, exclamation_count]
-            text_length = len(text)
-
-        return np.array(
-            [day_sin, day_cos, hour_sin, hour_cos, *style, text_length],
-            dtype=float,
-        )
-
-    def _normalize_embedding(self, embedding: Any) -> Optional[np.ndarray]:
-        if embedding is None:
-            return None
+        model_dir = os.path.join(GlobalConfig.BASE_DIR.parent, "embedding_migration")
+        log_event(logger, logging.INFO, "copy_scorer.v5.raw_init", model_dir=model_dir)
 
         try:
-            vector = np.asarray(embedding, dtype=float)
-        except (TypeError, ValueError):
-            return None
+            # 1. 메인 회귀 모델 (3087차원 버전)
+            # 대표님이 언급하신 '제일 숫자 큰거' 혹은 '가장 큰 용량' 모델 로드
+            self.reg_model = joblib.load(os.path.join(model_dir, "viral_model.pkl"))
+            self.hurdle_model = joblib.load(os.path.join(model_dir, "hurdle_model.pkl"))
 
-        if vector.shape != (self.EMBEDDING_DIM,):
-            return None
-        if np.any(np.isnan(vector)) or np.all(vector == 0):
-            return None
-        return vector
+            # 2. 토너먼트 모델 (3072 Raw 대결용)
+            self.tour_model = joblib.load(os.path.join(model_dir, "tournament_model.pkl"))
 
-    def _build_feature_matrix(
-        self, candidates_data: List[CandidateData], now: datetime
-    ) -> Tuple[np.ndarray, List[bool]]:
-        processed_vectors: List[np.ndarray] = []
-        valid_mask: List[bool] = []
+            # 3. 백분위 맵핑 (V16 기준)
+            if os.path.exists(os.path.join(model_dir, "percentile_map.pkl")):
+                self.p_map = joblib.load(os.path.join(model_dir, "percentile_map.pkl"))
+            else:
+                self.p_map = None
 
-        for item in candidates_data:
+            log_event(logger, logging.INFO, "copy_scorer.v5.raw_models_loaded")
+        except Exception as e:
+            log_event(logger, logging.ERROR, "copy_scorer.v5.raw_load_failed", error=str(e))
+            raise e
+
+    def extract_hyper_style_15(self, text: str) -> List[float]:
+        """[3072+15] 체제의 핵심 15가지 메타 피처 추출."""
+        target_time = datetime.now()
+
+        # 1-4. Time Features (4)
+        day_sin = np.sin(2 * np.pi * target_time.weekday() / 7)
+        day_cos = np.cos(2 * np.pi * target_time.weekday() / 7)
+        hour_sin = np.sin(2 * np.pi * target_time.hour / 24)
+        hour_cos = np.cos(2 * np.pi * target_time.hour / 24)
+
+        if not isinstance(text, str): return [day_sin, day_cos, hour_sin, hour_cos] + [0.0]*11
+
+        text = text.strip()
+        length = len(text) if len(text) > 0 else 1
+
+        # 5-10. Hard Count Style (6)
+        emoji_count = len(re.findall(r'[^\w\s,]', text))
+        line_count = text.count('\n')
+        tag_count = text.count('#')
+        mention_count = text.count('@')
+        q_count = text.count('?')
+        ex_count = text.count('!')
+
+        # 11-14. Ratios & Avg (4)
+        emoji_ratio = emoji_count / length
+        line_ratio = line_count / length
+        q_ratio = q_count / length
+        words = text.split()
+        avg_word_len = length / max(len(words), 1)
+
+        # 15. Length (1)
+        text_len_val = float(length)
+
+        return [day_sin, day_cos, hour_sin, hour_cos,
+                float(emoji_count), float(line_count), float(tag_count), float(mention_count),
+                float(q_count), float(ex_count), emoji_ratio, line_ratio, q_ratio, avg_word_len, text_len_val]
+
+    def map_to_percentile(self, val: float) -> float:
+        if self.p_map is None: return val
+        idx = np.searchsorted(self.p_map['targets'], val)
+        return float(self.p_map['percentiles'][min(idx, len(self.p_map['percentiles'])-1)])
+
+    def score_candidates(self, candidates_data: List[CandidateData], orig_index: Optional[int] = None) -> List[ScoreResult]:
+        """
+        [3072 + 15 Pure Power League]
+        NO PCA. DIRECT RAW EMBEDDING.
+        """
+        if not candidates_data: return []
+
+        raw_embeddings = []
+        all_meta_15 = []
+        valid_mask = []
+        processed_vecs_3087 = []
+
+        # 1. 피처 벡터 생성 (3072 + 15)
+        for i, item in enumerate(candidates_data):
+            vec = item.get("embedding")
             text = item.get("text", "")
-            embedding = self._normalize_embedding(item.get("embedding"))
 
-            if embedding is None:
-                processed_vectors.append(np.zeros(self.FEATURE_DIM, dtype=float))
+            if vec is None or np.any(np.isnan(vec)) or np.all(vec == 0):
                 valid_mask.append(False)
-                continue
+                processed_vecs_3087.append(np.zeros(self.EMBEDDING_DIM + 15))
+                all_meta_15.append([0.0]*15)
+                raw_embeddings.append(np.zeros(self.EMBEDDING_DIM))
+            else:
+                meta = self.extract_hyper_style_15(text)
+                v_full = np.hstack([vec, meta])
+                processed_vecs_3087.append(v_full)
+                all_meta_15.append(meta)
+                raw_embeddings.append(vec)
+                valid_mask.append(True)
 
-            meta_features = self._extract_meta_features(text, now)
-            processed_vectors.append(np.hstack([embedding, meta_features]))
-            valid_mask.append(True)
+        X_3087 = np.array(processed_vecs_3087)
+        valid_indices = [i for i, v in enumerate(valid_mask) if v]
+        if not valid_indices: return []
 
-        return np.array(processed_vectors, dtype=float), valid_mask
+        # 2. Regression & Hurdle
+        reg_scores = np.zeros(len(X_3087))
+        v_input = X_3087[valid_indices]
 
-    def _predict_reg_scores(self, feature_matrix: np.ndarray, valid_indices: List[int]) -> np.ndarray:
-        reg_scores = np.zeros(len(feature_matrix), dtype=float)
-        if not valid_indices:
-            return reg_scores
+        # Regression Score (Viral Model)
+        reg_preds = self.reg_model.predict(v_input)
+        for idx_in_valid, val in enumerate(reg_preds):
+            idx = valid_indices[idx_in_valid]
+            reg_scores[idx] = self.map_to_percentile(val)
 
-        predictions = self.reg_model.predict(feature_matrix[valid_indices])
-        clipped = np.clip(predictions, 0, 100)
-        for idx, score in zip(valid_indices, clipped):
-            reg_scores[idx] = float(score)
-        return reg_scores
+        # Hurdle Probability
+        hurdle_probs = np.zeros(len(X_3087))
+        h_probs_raw = self.hurdle_model.predict_proba(v_input)[:, 1]
+        for idx_in_valid, val in enumerate(h_probs_raw):
+            idx = valid_indices[idx_in_valid]
+            hurdle_probs[idx] = val
 
-    def _predict_hurdle_probs(self, feature_matrix: np.ndarray, valid_indices: List[int]) -> np.ndarray:
-        hurdle_probs = np.zeros(len(feature_matrix), dtype=float)
-        if not valid_indices:
-            return hurdle_probs
+        # 3. 결과 객체 초기화
+        results = []
+        for i in range(len(X_3087)):
+            results.append({
+                'index': i,
+                'reg_score': float(reg_scores[i]),
+                'hurdle_prob': float(hurdle_probs[i]),
+                'pass_hurdle': hurdle_probs[i] >= 0.5,
+                'league_wins': 0
+            })
 
-        predictions = self.hurdle_model.predict_proba(feature_matrix[valid_indices])[:, 1]
-        for idx, probability in zip(valid_indices, predictions):
-            hurdle_probs[idx] = float(probability)
-        return hurdle_probs
+        # 4. Raw Pairwise Tournament (Tournament Model - 77MB)
+        finalists = sorted(valid_indices, key=lambda i: reg_scores[i], reverse=True)[:self.LEAGUE_SIZE]
 
-    def _initialize_results(
-        self, reg_scores: np.ndarray, hurdle_probs: np.ndarray
-    ) -> List[ScoreResult]:
-        results: List[ScoreResult] = []
-        for index, reg_score in enumerate(reg_scores):
-            hurdle_prob = float(hurdle_probs[index])
-            results.append(
-                {
-                    "index": index,
-                    "reg_score": float(reg_score),
-                    "hurdle_prob": hurdle_prob,
-                    "pass_hurdle": hurdle_prob >= self.HURDLE_PASS_THRESHOLD,
-                    "final_wins": 0,
-                    "league_wins": 0,
-                }
-            )
-        return results
+        def compare_pair_raw(idx1: int, idx2: int) -> bool:
+            """원본 3072 임베딩을 생으로 대결시키는 거대 토너먼트."""
+            v1, v2 = raw_embeddings[idx1], raw_embeddings[idx2]
+            # 토너먼트 모델(6144D)은 Raw Embedding 3072+3072만 사용
+            tour_input = np.hstack([v1, v2]).reshape(1, -1)
+            win_prob = self.tour_model.predict_proba(tour_input)[0, 1]
+            return win_prob >= 0.5
 
-    def _apply_original_bonus(
-        self,
-        feature_matrix: np.ndarray,
-        valid_mask: List[bool],
-        reg_scores: np.ndarray,
-        results: List[ScoreResult],
-        orig_index: Optional[int],
-    ) -> None:
-        if orig_index is None or not (0 <= orig_index < len(feature_matrix)) or not valid_mask[orig_index]:
-            return
+        # 원본(Pivot) 보너스 및 리그전
+        pivot_idx = orig_index if (orig_index is not None and orig_index in finalists) else finalists[0]
 
-        max_beaten_reg = -1.0
-        beaten_count = 0
-
-        for opponent_index, is_valid in enumerate(valid_mask):
-            if opponent_index == orig_index or not is_valid:
-                continue
-
-            pair_vector = np.hstack([feature_matrix[orig_index], feature_matrix[opponent_index]]).reshape(1, -1)
-            win_probability = self.tour_model.predict_proba(pair_vector)[0, 1]
-            if win_probability > 0.5:
-                beaten_count += 1
-                max_beaten_reg = max(max_beaten_reg, reg_scores[opponent_index])
-
-        if beaten_count == 0:
-            return
-
-        new_score = max_beaten_reg + 0.05
-        reg_scores[orig_index] = new_score
-        results[orig_index]["reg_score"] = float(new_score)
-
-    def _select_league_participants(
-        self, valid_mask: List[bool], reg_scores: np.ndarray, hurdle_probs: np.ndarray
-    ) -> List[int]:
-        league_participants = sorted(
-            [index for index, is_valid in enumerate(valid_mask) if is_valid],
-            key=lambda index: reg_scores[index],
-            reverse=True,
-        )[: self.LEAGUE_SIZE]
-
-        wildcards = [
-            index
-            for index, is_valid in enumerate(valid_mask)
-            if is_valid
-            and hurdle_probs[index] >= self.WILDCARD_THRESHOLD
-            and index not in league_participants
-        ]
-
-        return league_participants + wildcards
-
-    def _run_league(
-        self, feature_matrix: np.ndarray, participants: List[int], results: List[ScoreResult]
-    ) -> None:
-        if len(participants) <= 1:
-            return
-
-        for left in range(len(participants)):
-            for right in range(left + 1, len(participants)):
-                idx1 = participants[left]
-                idx2 = participants[right]
-                pair_input = np.hstack([feature_matrix[idx1], feature_matrix[idx2]]).reshape(1, -1)
-                win_probability = self.tour_model.predict_proba(pair_input)[0, 1]
-                if win_probability > 0.5:
-                    results[idx1]["league_wins"] += 1
+        for f_idx in finalists:
+            if f_idx == pivot_idx: continue
+            try:
+                if compare_pair_raw(f_idx, pivot_idx):
+                    results[f_idx]['league_wins'] += 1
                 else:
-                    results[idx2]["league_wins"] += 1
+                    results[pivot_idx]['league_wins'] += 1
+            except Exception as e:
+                # 차원 불일치 등 예외 발생 시 스킵
+                continue
 
-    def _finalize_scores(self, results: List[ScoreResult], reg_scores: np.ndarray) -> None:
-        for result in results:
-            index = result["index"]
-            result["total_score"] = (result["league_wins"] * 1000) + reg_scores[index]
+        # 원본 보너스 적용 (max_beaten_reg + 0.05)
+        if orig_index is not None and valid_mask[orig_index] and orig_index in finalists:
+            beaten_others = []
+            for idx in finalists:
+                if idx == orig_index: continue
+                try:
+                    if not compare_pair_raw(idx, orig_index):
+                        beaten_others.append(idx)
+                except: continue
 
-    def score_candidates(
-        self, candidates_data: List[CandidateData], orig_index: Optional[int] = None
-    ) -> List[ScoreResult]:
-        if not candidates_data:
-            return []
+            if beaten_others:
+                max_beaten = max(reg_scores[idx] for idx in beaten_others)
+                results[orig_index]['reg_score'] = max_beaten + 0.05
+                reg_scores[orig_index] = max_beaten + 0.05
 
-        now = datetime.now()
-        feature_matrix, valid_mask = self._build_feature_matrix(candidates_data, now)
-        valid_indices = [index for index, is_valid in enumerate(valid_mask) if is_valid]
+        # 총점 합산
+        for res in results:
+            res['total_score'] = (res.get('league_wins', 0) * 1000) + res['reg_score']
 
-        reg_scores = self._predict_reg_scores(feature_matrix, valid_indices)
-        hurdle_probs = self._predict_hurdle_probs(feature_matrix, valid_indices)
-        results = self._initialize_results(reg_scores, hurdle_probs)
-
-        self._apply_original_bonus(feature_matrix, valid_mask, reg_scores, results, orig_index)
-        participants = self._select_league_participants(valid_mask, reg_scores, hurdle_probs)
-        self._run_league(feature_matrix, participants, results)
-        self._finalize_scores(results, reg_scores)
-
-        del feature_matrix
         gc.collect()
-
-        return sorted(results, key=lambda item: item["total_score"], reverse=True)
+        return sorted(results, key=lambda x: x['total_score'], reverse=True)
