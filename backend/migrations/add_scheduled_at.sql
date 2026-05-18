@@ -1,2 +1,0 @@
-﻿ALTER TABLE mab_feedback_loop ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMP;
-
