@@ -1,0 +1,43 @@
+{
+  "managed_dir": "E:\\madoyo_embeddings\\20260522\\separate",
+  "copied_count": 6,
+  "legacy_text_only_found": 3,
+  "items": [
+    {
+      "source": "C:\\Users\\ding9\\Desktop\\correctbody\\embedding_outputs\\excel_not_in_pkl_1930.pkl",
+      "dest": "E:\\madoyo_embeddings\\20260522\\separate\\new_added\\excel_not_in_pkl_1930.pkl",
+      "size": 65278506,
+      "sha1": "ca0de7dbdb32d762a334db3da605a2de9a365025"
+    },
+    {
+      "source": "C:\\Users\\ding9\\Desktop\\correctbody\\embedding_outputs\\my_accounts_ml_1083.pkl",
+      "dest": "E:\\madoyo_embeddings\\20260522\\separate\\my_accounts_combined\\my_accounts_ml_1083.pkl",
+      "size": 61242192,
+      "sha1": "2f611747fdb8723db0e89b735e323014b8d4e438"
+    },
+    {
+      "source": "C:\\Users\\ding9\\Desktop\\correctbody\\embedding_outputs\\original_update_113_candidate.pkl",
+      "dest": "E:\\madoyo_embeddings\\20260522\\separate\\original_update_candidate\\original_update_113_candidate.pkl",
+      "size": 6253085,
+      "sha1": "8f1dd72df9579d0a3397e4ccc5855e9bab7b03e8"
+    },
+    {
+      "source": "E:\\내꺼세희\\threads_slow_report_0430_0112_text_embeddings_20260501.pkl",
+      "dest": "E:\\madoyo_embeddings\\20260522\\separate\\my_accounts_text_only_legacy\\threads_slow_report_0430_0112_text_embeddings_20260501.pkl",
+      "size": 6994251,
+      "sha1": "6c70923f3463412044ddb1a3199acaabc70ccff4"
+    },
+    {
+      "source": "E:\\내꺼파스\\threads_slow_report_0430_1258_text_embeddings_20260501.pkl",
+      "dest": "E:\\madoyo_embeddings\\20260522\\separate\\my_accounts_text_only_legacy\\threads_slow_report_0430_1258_text_embeddings_20260501.pkl",
+      "size": 5622514,
+      "sha1": "55f9f000f351df7362be1d0f8aaaabd0559154ae"
+    },
+    {
+      "source": "E:\\내꺼도토리\\threads_slow_report_0430_1724_text_embeddings_20260501.pkl",
+      "dest": "E:\\madoyo_embeddings\\20260522\\separate\\my_accounts_text_only_legacy\\threads_slow_report_0430_1724_text_embeddings_20260501.pkl",
+      "size": 7833210,
+      "sha1": "18c95efdfdc2e0c05909749e0fcd30baa4bc4a0a"
+    }
+  ]
+}

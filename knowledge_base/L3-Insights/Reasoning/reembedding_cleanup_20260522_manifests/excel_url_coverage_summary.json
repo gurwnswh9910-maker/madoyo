@@ -1,0 +1,16 @@
+{
+  "created_at": "2026-05-22",
+  "madoyo_excel_file_count": 320,
+  "e_drive_excel_file_count": 94,
+  "madoyo_excel_read_errors": 5,
+  "e_drive_excel_read_errors": 3,
+  "madoyo_unique_thread_urls": 18449,
+  "e_drive_unique_thread_urls": 1599,
+  "madoyo_unique_post_keys": 15204,
+  "e_drive_unique_post_keys": 1594,
+  "madoyo_post_keys_missing_from_e_drive": 13642,
+  "madoyo_exact_urls_missing_from_e_drive": 16882,
+  "e_drive_extra_post_keys": 32,
+  "pkl_file_count_manifested": 7,
+  "note": "Coverage uses Threads account/post code as canonical key so threads.com vs threads.net does not create false missing rows."
+}

@@ -1,0 +1,10 @@
+﻿{
+    "source_root":  "C:\\Users\\ding9\\Desktop\\madoyo",
+    "archive_root":  "E:\\madoyo_excel_archive_20260522\\from_madoyo",
+    "cleanup_root":  "C:\\Users\\ding9\\Desktop\\폐기\\madoyo_cleanup_20260522\\excel_from_madoyo",
+    "total_files":  316,
+    "moved":  316,
+    "errors":  0,
+    "remaining_in_madoyo":  0,
+    "manifest":  "C:\\Users\\ding9\\Desktop\\madoyo\\knowledge_base\\L3-Insights\\Reasoning\\reembedding_cleanup_20260522_manifests\\madoyo_excel_archive_and_move_manifest.csv"
+}
