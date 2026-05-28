@@ -341,6 +341,85 @@ OPENROUTER_API_KEY=
 - 계정별 변수명에는 실제 계정명을 쓰지 않고 `1`, `2`, `3` 슬롯만 씁니다.
 - 자동 업로드 전에는 단건 테스트를 먼저 실행합니다.
 
+## 비개발자가 자주 하는 실수
+
+사용자는 대부분 Codex 에이전트에게 맡긴다고 가정합니다. 에이전트는 아래 항목을 사용자가 말하기 전에 먼저 확인하고, 문제가 있으면 쉬운 말로 바로잡아야 합니다.
+
+1. `.env.template`만 채우고 `.env`를 만들지 않는 경우
+   - 에이전트는 먼저 루트에 `.env`가 있는지 확인합니다.
+   - 없으면 `.env.template`을 복사해서 `.env`를 만듭니다.
+   - 실제 값은 `.env`에만 넣고 `.env.template`에는 예시 형식만 둡니다.
+
+2. API key나 access token을 채팅창, README, GitHub에 붙여넣는 경우
+   - 에이전트는 실제 값을 채팅에 붙여넣지 말라고 안내합니다.
+   - 사용자가 값을 넣어야 하면 `.env` 파일의 정확한 줄만 알려줍니다.
+   - 확인할 때도 값 전체를 읽지 말고 "비어 있음/들어 있음"만 말합니다.
+
+3. `=` 왼쪽 변수명을 바꾸거나 지우는 경우
+   - 예: `GEMINI_API_KEY=`를 `제미나이키=`로 바꾸면 안 됩니다.
+   - 에이전트는 변수명은 그대로 두고 `=` 오른쪽에만 값을 넣게 안내합니다.
+   - 따옴표, 쉼표, 설명 문장을 같이 붙여넣지 않았는지 확인합니다.
+
+4. 복사할 값이 아니라 화면의 설명 글자를 복사하는 경우
+   - 예: `복사한_threads_app_secret`, `발급받은_access_key` 같은 예시 문구를 그대로 넣으면 안 됩니다.
+   - 에이전트는 예시 문구가 `.env`에 남아 있으면 실제 발급값으로 바꾸도록 안내합니다.
+   - 단, 실제 값은 화면에 출력하지 않습니다.
+
+5. 계정 슬롯 번호를 섞는 경우
+   - `THREADS_CURRENT_ACCOUNT=1`이면 `THREADS_ACCOUNT_1_USER_ID`, `THREADS_ACCOUNT_1_ACCESS_TOKEN`, `THREADS_ACCOUNT_1_APP_SECRET`을 같이 채워야 합니다.
+   - `COUPANG_CURRENT_ACCOUNT=1`이면 `COUPANG_ACCESS_KEY_1`, `COUPANG_SECRET_KEY_1`을 같이 채워야 합니다.
+   - 에이전트는 `1`, `2`, `3` 중 현재 번호가 무엇인지 먼저 확인합니다.
+
+6. 계정 이름을 변수명에 넣는 경우
+   - `THREADS_ACCOUNT_store_ACCESS_TOKEN`처럼 만들지 않습니다.
+   - 공유용 README 기준은 항상 `THREADS_ACCOUNT_1_ACCESS_TOKEN` 같은 번호 슬롯입니다.
+   - 사용자가 여러 계정을 쓰면 계정 이름은 말로만 구분하고, 파일에는 번호만 씁니다.
+
+7. Threads에서 short-lived access token만 넣고 long-lived token 교환을 안 하는 경우
+   - short-lived access token은 오래 쓰는 값이 아닙니다.
+   - 에이전트는 `THREADS_SHORT_LIVED_TOKEN`과 `THREADS_TOKEN_EXCHANGE_APP_SECRET`을 넣은 뒤 `python 자동화/get_token.py`를 실행하게 안내합니다.
+   - 성공 후 `THREADS_ACCOUNT_<번호>_ACCESS_TOKEN`이 채워졌는지 확인합니다.
+
+8. Threads 권한을 빼먹는 경우
+   - 최소 권한은 `threads_basic`, `threads_content_publish`입니다.
+   - 에이전트는 토큰 발급 과정에서 이 권한을 선택했는지 확인합니다.
+   - 업로드 오류가 나면 access token 권한부터 확인합니다.
+
+9. Threads 이미지/영상에 내 PC 파일 경로를 넣는 경우
+   - Threads API는 `C:\...`, `D:\...`, `E:\...` 같은 내 PC 경로를 직접 가져갈 수 없습니다.
+   - 이미지와 영상은 Threads가 접근 가능한 공개 URL이어야 합니다.
+   - 에이전트는 업로드 전 media URL이 `http://` 또는 `https://`로 시작하는지 확인합니다.
+
+10. Coupang Access Key와 Secret Key를 다른 계정 것끼리 섞는 경우
+    - 두 값은 같은 화면에서 같은 계정으로 발급된 쌍이어야 합니다.
+    - 에이전트는 `python 자동화/verify_new_coupang_api.py`로 먼저 검증합니다.
+    - 실패하면 키를 다시 복사하게 안내하고, 값 자체는 출력하지 않습니다.
+
+11. Coupang API 메뉴가 안 보이는데 코드 문제로 착각하는 경우
+    - 계정 승인 상태나 메뉴 위치에 따라 API 발급 버튼이 안 보일 수 있습니다.
+    - 에이전트는 먼저 쿠팡 파트너스 또는 WING 화면에서 API 발급 메뉴가 있는지 확인하게 안내합니다.
+    - 메뉴가 없으면 계정 승인/권한 문제일 수 있다고 설명합니다.
+
+12. Gemini 대신 다른 AI를 넣고도 이미지 분석 품질이 같을 거라고 기대하는 경우
+    - 현재 기본 선택은 Gemini입니다. 이유는 이미지/비전 입력을 잘 처리하기 때문입니다.
+    - 다른 AI를 쓰려면 `.env` 키만 추가하는 것으로 끝나지 않고, 모델 호출 코드도 확인해야 합니다.
+    - 에이전트는 이미지가 들어가는 작업에서는 Gemini 경로를 우선 유지합니다.
+
+13. Git LFS 파일을 받지 않고 실행하는 경우
+    - 큰 pkl/vector 파일은 일반 Git 파일처럼 바로 내려오지 않을 수 있습니다.
+    - 에이전트는 처음 설치 후 `git lfs pull`을 실행했는지 확인합니다.
+    - pkl 파일 크기가 너무 작거나 내용이 포인터처럼 보이면 LFS를 다시 받게 안내합니다.
+
+14. 처음부터 전체 자동 업로드를 실행하는 경우
+    - 에이전트는 바로 대량 업로드를 권하지 않습니다.
+    - 먼저 `.env` 확인, API 검증, 단건 테스트 순서로 진행합니다.
+    - 단건 성공 후에만 자동 업로드 개수를 늘립니다.
+
+15. 오래된 절대 경로를 그대로 쓰는 경우
+    - `E:\...` 같은 개인 PC 경로는 공유 환경에서 깨질 수 있습니다.
+    - 에이전트는 `MADOYO_EMBEDDING_STORAGE_PATH`, `MADOYO_MEDIA_TMP_DIR` 같은 값이 repo 안의 상대 경로인지 확인합니다.
+    - 공유용 설정은 가능하면 `upgrade_final_vector/...`, `tmp/...`처럼 repo 기준 경로를 씁니다.
+
 ## 문제 해결
 
 Gemini 키 오류:
