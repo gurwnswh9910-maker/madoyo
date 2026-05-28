@@ -231,7 +231,8 @@ def run_optimization(original_copy: str, product_focus, input_image_urls: list =
                        api_key: str = None, model_name: str = None, base_path: str = None,
                        shared_resources: dict = None, return_metadata: bool = False,
                        raw_candidate_collector: list | None = None,
-                       generator_version: str = "upgrade_v10"):
+                       generator_version: str = "upgrade_v10",
+                       retrieval_bucket: str | None = None):
     import concurrent.futures
     from google import genai
     from embedding_utils import EmbeddingManager
@@ -338,7 +339,20 @@ def run_optimization(original_copy: str, product_focus, input_image_urls: list =
     filtered_subset = pd.DataFrame()
     query_vec = None
     
-    if original_copy and input_image_urls:
+    forced_bucket = (retrieval_bucket or "").strip().lower()
+    if forced_bucket and forced_bucket not in {"text", "visual", "multi"}:
+        raise ValueError("retrieval_bucket must be one of: text, visual, multi")
+
+    if forced_bucket == "visual":
+        print(f"   🎯 [Media Manual] Visual-only Alpha Score 회수 중.. (Sim 30% : MSS 70%)")
+        query_vec = emb_mgr.get_visual_embedding(input_image_urls)
+    elif forced_bucket == "multi":
+        print(f"   🎯 [Forced Multi] 2D Alpha Score (Multi) 회수 중.. (Sim 30% : MSS 70%)")
+        query_vec = emb_mgr.get_multimodal_embedding(text=original_copy, image_paths_or_urls=input_image_urls)
+    elif forced_bucket == "text":
+        print(f"   🎯 [Forced Text] 2D Alpha Score (Text) 회수 중.. (Sim 30% : MSS 70%)")
+        query_vec = emb_mgr.get_text_embedding(original_copy)
+    elif original_copy and input_image_urls:
         print(f"   🎯 [Case 3] 2D Alpha Score (Multi) 회수 중.. (Sim 30% : MSS 70%)")
         query_vec = emb_mgr.get_multimodal_embedding(text=original_copy, image_paths_or_urls=input_image_urls)
     elif input_image_urls:
@@ -356,11 +370,14 @@ def run_optimization(original_copy: str, product_focus, input_image_urls: list =
         text = str(row.get('본문', '')).strip()
         link_key = str(row['링크']).strip() if '링크' in row and pd.notna(row['링크']) else ''
         
-        ref = emb_mgr.resolve_cached_reference('text', text=text, storage_key=link_key)
-        if ref is None:
-            ref = emb_mgr.resolve_cached_reference('multi', text=text, storage_key=link_key)
-        if ref is None:
-            ref = emb_mgr.resolve_cached_reference('visual', text=text, storage_key=link_key)
+        if forced_bucket:
+            ref = emb_mgr.resolve_cached_reference(forced_bucket, text=text, storage_key=link_key)
+        else:
+            ref = emb_mgr.resolve_cached_reference('text', text=text, storage_key=link_key)
+            if ref is None:
+                ref = emb_mgr.resolve_cached_reference('multi', text=text, storage_key=link_key)
+            if ref is None:
+                ref = emb_mgr.resolve_cached_reference('visual', text=text, storage_key=link_key)
 
         if ref is not None:
             valid_indices.append(idx)
@@ -729,7 +746,18 @@ def run_optimization(original_copy: str, product_focus, input_image_urls: list =
                 "embedding_store_mode": emb_mgr.get_storage_mode(),
                 "embedding_storage_counts": emb_mgr.get_storage_counts(),
                 "precomputed_retrieval_count": len(vector_refs),
+                "retrieval_bucket": forced_bucket or "auto",
                 "retrieval_chunk_size": RETRIEVAL_SIMILARITY_CHUNK_SIZE,
+                "retrieved_examples": [
+                    {
+                        "rank": idx,
+                        "본문": str(row.get("본문", "")),
+                        "MSS": float(row.get("MSS", 0) or 0),
+                        "alpha_score": float(row.get("alpha_score", 0) or 0),
+                        "링크": str(row.get("링크", "")) if "링크" in row else "",
+                    }
+                    for idx, (_, row) in enumerate(best_similar_posts.head(10).iterrows(), 1)
+                ],
                 "repeated_char_hard_limit": generation_stats["repeated_char_hard_limit"],
                 "max_thread_text_length": generation_stats["max_thread_text_length"],
                 "hygiene_rejection_count": generation_stats["hygiene_rejection_count"],
