@@ -23,13 +23,19 @@ from app_config import (
 
 from data_feedback_loop_v2 import MSSDataIntegrator
 from copy_scorer_soft_ensemble import CopyScorerSoftEnsemble
+try:
+    from practical_final_copy_scorer import PracticalFinalCopyScorer
+except Exception:
+    PracticalFinalCopyScorer = None
 from copy_generator_v2 import DynamicCopyGenerator
 from contrastive_prompter import ContrastivePrompter
+from content_guard import DEFAULT_MAX_BODY_LINES, MAX_THREADS_TEXT_LENGTH, get_text_rejection
 
 SIBLING_COPY_COUNT = 3
 DUPLICATE_SIMILARITY_THRESHOLD = 0.985
 RETRIEVAL_SIMILARITY_CHUNK_SIZE = max(64, int(os.getenv("MADOYO_RETRIEVAL_CHUNK_SIZE", "256")))
-REPEATED_CHAR_PATTERN = re.compile(r"([^\s])\1{5,}")
+COPY_SCORER_MODE = os.getenv("MADOYO_COPY_SCORER_MODE", "practical_final_directional").strip().lower()
+FINAL_RERANK_POOL_SIZE = max(10, int(os.getenv("MADOYO_FINAL_RERANK_POOL_SIZE", "20")))
 
 def is_korean(text):
     if not isinstance(text, str): return False
@@ -47,18 +53,16 @@ def clean_marketing_text(text):
 
 def get_copy_hygiene_rejection(text):
     """명백한 생성 붕괴 후보를 채점 전에 제외합니다."""
-    text = text or ""
-    repeated = REPEATED_CHAR_PATTERN.search(text)
-    if repeated:
-        return {
-            "reason": "same_char_repeat_6",
-            "repeat_char": repeated.group(1),
-            "repeat_len": len(repeated.group(0)),
-            "repeat_index": repeated.start(),
-            "repeat_preview": repeated.group(0)[:12],
-        }
-
-    return None
+    return get_text_rejection(
+        text,
+        max_length=MAX_THREADS_TEXT_LENGTH,
+        reject_repeated=True,
+        reject_meta=True,
+        reject_urls=True,
+        reject_disclosure=True,
+        max_lines=DEFAULT_MAX_BODY_LINES,
+        min_hangul_chars=5,
+    )
 
 def get_block(text, start_key, end_key=None):
     if start_key not in text: return None
@@ -80,15 +84,25 @@ def extract_fields(block):
     if not desc: desc = block
     return name, desc
 
-def extract_tag_block(text, tag):
-    marker = f"[{tag}]"
-    if marker not in text:
-        return None
-    start_idx = text.find(marker) + len(marker)
-    end_idx = text.find("[", start_idx)
-    if end_idx == -1:
-        return text[start_idx:].strip()
-    return text[start_idx:end_idx].strip()
+def extract_tagged_final_copies(text):
+    """FINAL_COPY 태그가 명확한 블록만 업로드 후보로 살립니다."""
+    text = text or ""
+    tag_pattern = re.compile(r"\[(FINAL_COPY(?:_\d+)?|DRAFT_COPY)\]", re.IGNORECASE)
+    matches = list(tag_pattern.finditer(text))
+    if not matches:
+        return []
+
+    copies = []
+    for idx, match in enumerate(matches):
+        tag = match.group(1).upper()
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
+        block = text[start:end].strip()
+        if tag == "DRAFT_COPY":
+            continue
+        if tag == "FINAL_COPY" or re.fullmatch(r"FINAL_COPY_\d+", tag):
+            copies.append(block)
+    return copies
 
 def normalize_copy_for_similarity(text):
     text = clean_marketing_text(text or "")
@@ -122,6 +136,15 @@ def build_candidate_cache_key(text, image_ref=None):
     image_key = str(image_ref or "")
     return f"{image_key}::{normalize_similarity_text(text)}"
 
+def build_copy_scorer():
+    if COPY_SCORER_MODE in {"practical", "practical_final", "practical_final_directional"} and PracticalFinalCopyScorer is not None:
+        try:
+            print("   🧭 [CopyScorer] practical_final_directional 모드 사용")
+            return PracticalFinalCopyScorer()
+        except Exception as exc:
+            print(f"   ⚠️ [CopyScorer] practical scorer 로드 실패, soft ensemble로 진행: {exc}")
+    return CopyScorerSoftEnsemble()
+
 def generate_single_task(client, model, task):
     cid = task['cid']
     prompt = task['prompt']
@@ -134,25 +157,15 @@ def generate_single_task(client, model, task):
                 gen_time = time.time() - t_gen
                 raw_text = response.text.strip()
                 
-                # 가이드 태그 기반 파싱 로직
-                copies = []
-                
-                for tag in [f"FINAL_COPY_{i}" for i in range(1, SIBLING_COPY_COUNT + 1)]:
-                    tagged_copy = extract_tag_block(raw_text, tag)
-                    if tagged_copy:
-                        copies.append(tagged_copy)
-
+                copies = extract_tagged_final_copies(raw_text)
                 if not copies:
-                    draft = extract_tag_block(raw_text, "DRAFT_COPY")
-                    final = extract_tag_block(raw_text, "FINAL_COPY")
-                    if draft: copies.append(draft)
-                    if final: copies.append(final)
-                
-                # 에러헨들링: 태그가 없으면 전체 텍스트를 하나로 처리
-                if not copies:
-                    clean_text = re.sub(r'^[`"\'\s]+|[`"\'\s]+$', '', raw_text)
-                    clean_text = re.sub(r'^```.*?\n|```$', '', clean_text, flags=re.MULTILINE).strip()
-                    copies = [clean_text]
+                    return {
+                        "success": False,
+                        "cid": cid,
+                        "error": "strict_parse_no_final_copy_tags",
+                        "strategy": strat_label,
+                        "raw_preview": raw_text[:200],
+                    }
                 
                 return {"success": True, "cid": cid, "copies": copies, "strategy": strat_label, "time": gen_time}
             except Exception as e:
@@ -248,6 +261,7 @@ def run_optimization(original_copy: str, product_focus, input_image_urls: list =
     rerank_reused_embedding_count = 0
     embedding_session_stats = {"hits": 0, "misses": 0}
     candidate_embedding_cache = {}
+    candidate_text_embedding_cache = {}
     generation_stats = {
         "static_strategy_count": 0,
         "dynamic_strategy_count": 0,
@@ -267,6 +281,7 @@ def run_optimization(original_copy: str, product_focus, input_image_urls: list =
         "generation_failures": [],
     }
     target_img = input_image_urls[0] if input_image_urls else None
+    generation_stats["max_thread_text_length"] = MAX_THREADS_TEXT_LENGTH
 
     def get_candidate_embedding(text):
         cache_key = build_candidate_cache_key(text, target_img)
@@ -280,6 +295,16 @@ def run_optimization(original_copy: str, product_focus, input_image_urls: list =
         else:
             vec = emb_mgr.get_text_embedding(text, persist=False)
         candidate_embedding_cache[cache_key] = vec
+        return vec
+
+    def get_candidate_text_embedding(text):
+        cache_key = normalize_similarity_text(text)
+        if cache_key in candidate_text_embedding_cache:
+            embedding_session_stats["hits"] += 1
+            return candidate_text_embedding_cache[cache_key]
+        embedding_session_stats["misses"] += 1
+        vec = emb_mgr.get_text_embedding(text, persist=False)
+        candidate_text_embedding_cache[cache_key] = vec
         return vec
 
     # shared_resources is initialized above.
@@ -300,9 +325,10 @@ def run_optimization(original_copy: str, product_focus, input_image_urls: list =
     # 1-2. EmbeddingManager 로드
     emb_mgr = shared_resources.get('emb_mgr')
     if not emb_mgr:
-        pkl_full_path = os.path.join(_base_path, '작동중코드', 'embeddings_v2_final.pkl')
+        pkl_full_path = str(GlobalConfig.STORAGE_PATH)
         if not os.path.exists(pkl_full_path):
-            pkl_full_path = os.path.join(_base_path, 'embeddings_v2_final.pkl')
+            legacy_path = os.path.join(_base_path, '작동중코드', 'embeddings_v2_final.pkl')
+            pkl_full_path = legacy_path if os.path.exists(legacy_path) else os.path.join(_base_path, 'embeddings_v2_final.pkl')
         emb_mgr = EmbeddingManager(storage_path=pkl_full_path)
         shared_resources['emb_mgr'] = emb_mgr
     
@@ -402,7 +428,7 @@ def run_optimization(original_copy: str, product_focus, input_image_urls: list =
     print("\n4. 전략 추출 및 카피 생성...")
     scorer = shared_resources.get('scorer')
     if not scorer:
-        scorer = CopyScorerSoftEnsemble()
+        scorer = build_copy_scorer()
         shared_resources['scorer'] = scorer
     
     orig_vec = emb_mgr.get_multimodal_embedding(text=original_copy, image_paths_or_urls=input_image_urls) if input_image_urls else emb_mgr.get_text_embedding(original_copy)
@@ -583,9 +609,10 @@ def run_optimization(original_copy: str, product_focus, input_image_urls: list =
 
     scored = sorted(scored, key=lambda x: x['total_score'], reverse=True)
     
-    print(f"\n5. 최종 토너먼트 리랭킹 (Top 10 리그전)...")
+    rerank_pool = scored[:FINAL_RERANK_POOL_SIZE]
+    print(f"\n5. 최종 토너먼트 리랭킹 (Top {len(rerank_pool)} 리그전)...")
     final_candidates_vecs = []
-    for item in scored[:10]:
+    for item in rerank_pool:
         v = item.get("rerank_embedding")
         if v is not None:
             rerank_reused_embedding_count += 1
@@ -596,9 +623,32 @@ def run_optimization(original_copy: str, product_focus, input_image_urls: list =
         final_candidates_vecs.append(v)
     
     if final_candidates_vecs:
-        orig_idx_in_final = next((i for i, item in enumerate(scored[:10]) if item['cid'] == 'Original'), None)
-        final_candidate_texts = [item['copy'] for item in scored[:10]]
-        refined_results = scorer.score_candidates(np.array(final_candidates_vecs), orig_index=orig_idx_in_final, candidate_texts=final_candidate_texts)
+        orig_idx_in_final = next((i for i, item in enumerate(rerank_pool) if item['cid'] == 'Original'), None)
+        final_candidate_texts = [item['copy'] for item in rerank_pool]
+        text_vecs = []
+        for text in final_candidate_texts:
+            t_vec = get_candidate_text_embedding(text)
+            if t_vec is None:
+                t_vec = np.zeros_like(final_candidates_vecs[0])
+            text_vecs.append(t_vec)
+
+        visual_vecs = None
+        if target_img:
+            visual_vec = emb_mgr.get_visual_embedding([target_img], persist=False)
+            if visual_vec is None:
+                visual_vec = np.zeros_like(final_candidates_vecs[0])
+            visual_vecs = np.asarray([visual_vec for _ in final_candidate_texts], dtype=np.float32)
+
+        refined_kwargs = {
+            "orig_index": orig_idx_in_final,
+            "candidate_texts": final_candidate_texts,
+        }
+        if "PracticalFinalCopyScorer" in scorer.__class__.__name__:
+            refined_kwargs["text_embeddings"] = np.asarray(text_vecs, dtype=np.float32)
+            if visual_vecs is not None:
+                refined_kwargs["visual_embeddings"] = visual_vecs
+
+        refined_results = scorer.score_candidates(np.array(final_candidates_vecs), **refined_kwargs)
         
         for r_res in refined_results:
             orig_list_idx = r_res['index']
@@ -651,9 +701,14 @@ def run_optimization(original_copy: str, product_focus, input_image_urls: list =
                 "confidence_gate_final_score": score_data.get("confidence_gate_final_score", 0),
                 "confidence_gate": score_data.get("confidence_gate", {}),
                 "ensemble_components": score_data.get("ensemble_components", {}),
+                "practical_final_score": score_data.get("practical_final_score"),
+                "pre_practical_total_score": score_data.get("pre_practical_total_score"),
+                "practical_directional_mode": score_data.get("practical_directional_mode", {}),
+                "practical_learned_qa": score_data.get("practical_learned_qa", {}),
+                "practical_ltr_sidecar": score_data.get("practical_ltr_sidecar", {}),
             }
 
-        top_candidates = [serialize_candidate(idx, item) for idx, item in enumerate(scored[:10], 1)]
+        top_candidates = [serialize_candidate(idx, item) for idx, item in enumerate(scored[:FINAL_RERANK_POOL_SIZE], 1)]
         all_candidates = [serialize_candidate(idx, item) for idx, item in enumerate(scored, 1)]
 
         return {
@@ -667,11 +722,16 @@ def run_optimization(original_copy: str, product_focus, input_image_urls: list =
                 "embedding_cache_hits": embedding_session_stats["hits"],
                 "embedding_cache_misses": embedding_session_stats["misses"],
                 "embedding_cache_size": len(candidate_embedding_cache),
+                "text_embedding_cache_size": len(candidate_text_embedding_cache),
+                "copy_scorer_mode": COPY_SCORER_MODE,
+                "copy_scorer_class": scorer.__class__.__name__,
+                "final_rerank_pool_size": FINAL_RERANK_POOL_SIZE,
                 "embedding_store_mode": emb_mgr.get_storage_mode(),
                 "embedding_storage_counts": emb_mgr.get_storage_counts(),
                 "precomputed_retrieval_count": len(vector_refs),
                 "retrieval_chunk_size": RETRIEVAL_SIMILARITY_CHUNK_SIZE,
                 "repeated_char_hard_limit": generation_stats["repeated_char_hard_limit"],
+                "max_thread_text_length": generation_stats["max_thread_text_length"],
                 "hygiene_rejection_count": generation_stats["hygiene_rejection_count"],
                 "hygiene_rejections": generation_stats["hygiene_rejections"],
                 "duplicate_similarity_threshold": DUPLICATE_SIMILARITY_THRESHOLD,

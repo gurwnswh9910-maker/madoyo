@@ -1,0 +1,333 @@
+{
+  "output": "upgrade_final_vector\\embeddings_upgrade_final.pkl",
+  "counts": {
+    "text": 7488,
+    "visual": 7488,
+    "multi": 7488,
+    "metadata": 7488
+  },
+  "sources": [
+    {
+      "label": "final_overlay113",
+      "category": "final",
+      "path": "upgrade_final_vector\\source_vectors\\embeddings_v2_final_20260522_overlay113.pkl",
+      "added": {
+        "text": 4290,
+        "visual": 4160,
+        "multi": 4290,
+        "metadata": 4290
+      },
+      "duplicates": {
+        "text": 0,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 0
+      },
+      "input_counts": {
+        "text": 4290,
+        "visual": 4160,
+        "multi": 4290,
+        "metadata": 4290
+      }
+    },
+    {
+      "label": "final_consolidated_master_visual_fill",
+      "category": "final",
+      "path": "embedding_migration\\final_consolidated_master.pkl",
+      "added": {
+        "text": 0,
+        "visual": 130,
+        "multi": 0,
+        "metadata": 0
+      },
+      "duplicates": {
+        "text": 4290,
+        "visual": 4160,
+        "multi": 4290,
+        "metadata": 4290
+      },
+      "input_counts": {
+        "text": 4290,
+        "visual": 4290,
+        "multi": 4290,
+        "metadata": 4290
+      }
+    },
+    {
+      "label": "working_final",
+      "category": "final",
+      "path": "작동중코드\\embeddings_v2_final.pkl",
+      "added": {
+        "text": 0,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 0
+      },
+      "duplicates": {
+        "text": 4290,
+        "visual": 4160,
+        "multi": 4290,
+        "metadata": 4290
+      },
+      "input_counts": {
+        "text": 4290,
+        "visual": 4160,
+        "multi": 4290,
+        "metadata": 4290
+      }
+    },
+    {
+      "label": "external_excel_not_in_pkl_1930",
+      "category": "external",
+      "path": "upgrade_final_vector\\source_vectors\\excel_not_in_pkl_1930.pkl",
+      "added": {
+        "text": 1930,
+        "visual": 1930,
+        "multi": 1930,
+        "metadata": 1930
+      },
+      "duplicates": {
+        "text": 0,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 0
+      },
+      "input_counts": {
+        "text": 1930,
+        "visual": 1930,
+        "multi": 1930,
+        "metadata": 1930
+      }
+    },
+    {
+      "label": "external_original_update_113",
+      "category": "external",
+      "path": "upgrade_final_vector\\source_vectors\\original_update_113_candidate.pkl",
+      "added": {
+        "text": 21,
+        "visual": 21,
+        "multi": 21,
+        "metadata": 21
+      },
+      "duplicates": {
+        "text": 92,
+        "visual": 92,
+        "multi": 92,
+        "metadata": 92
+      },
+      "input_counts": {
+        "text": 113,
+        "visual": 113,
+        "multi": 113,
+        "metadata": 113
+      }
+    },
+    {
+      "label": "external_review_0404",
+      "category": "external",
+      "path": "연구소\\embeddings_review_0404.pkl",
+      "added": {
+        "text": 218,
+        "visual": 218,
+        "multi": 218,
+        "metadata": 218
+      },
+      "duplicates": {
+        "text": 0,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 0
+      },
+      "input_counts": {
+        "text": 218,
+        "visual": 218,
+        "multi": 218,
+        "metadata": 218
+      }
+    },
+    {
+      "label": "my_account_combined_ml_1083",
+      "category": "my_account",
+      "path": "upgrade_final_vector\\source_vectors\\my_accounts_ml_1083.pkl",
+      "added": {
+        "text": 1029,
+        "visual": 1029,
+        "multi": 1029,
+        "metadata": 1029
+      },
+      "duplicates": {
+        "text": 54,
+        "visual": 54,
+        "multi": 54,
+        "metadata": 54
+      },
+      "input_counts": {
+        "text": 1083,
+        "visual": 1083,
+        "multi": 1083,
+        "metadata": 1083
+      }
+    },
+    {
+      "label": "my_account_0430_0112_text",
+      "category": "my_account",
+      "path": "upgrade_final_vector\\source_vectors\\threads_slow_report_0430_0112_text_embeddings_20260501.pkl",
+      "added": {
+        "text": 0,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 0
+      },
+      "duplicates": {
+        "text": 250,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 250
+      },
+      "input_counts": {
+        "text": 250,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 250
+      }
+    },
+    {
+      "label": "my_account_0430_1258_text",
+      "category": "my_account",
+      "path": "upgrade_final_vector\\source_vectors\\threads_slow_report_0430_1258_text_embeddings_20260501.pkl",
+      "added": {
+        "text": 0,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 0
+      },
+      "duplicates": {
+        "text": 201,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 201
+      },
+      "input_counts": {
+        "text": 201,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 201
+      }
+    },
+    {
+      "label": "my_account_0430_1724_text",
+      "category": "my_account",
+      "path": "upgrade_final_vector\\source_vectors\\threads_slow_report_0430_1724_text_embeddings_20260501.pkl",
+      "added": {
+        "text": 0,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 0
+      },
+      "duplicates": {
+        "text": 280,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 280
+      },
+      "input_counts": {
+        "text": 280,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 280
+      }
+    },
+    {
+      "label": "my_account_0322_0416",
+      "category": "my_account",
+      "path": "연구소\\threads_live_report_0322_0416_embeddings_v2_final.pkl",
+      "added": {
+        "text": 0,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 0
+      },
+      "duplicates": {
+        "text": 30,
+        "visual": 30,
+        "multi": 30,
+        "metadata": 30
+      },
+      "input_counts": {
+        "text": 30,
+        "visual": 30,
+        "multi": 30,
+        "metadata": 30
+      }
+    },
+    {
+      "label": "my_account_0415_0055",
+      "category": "my_account",
+      "path": "연구소\\threads_live_report_0415_0055_embeddings_v2_final.pkl",
+      "added": {
+        "text": 0,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 0
+      },
+      "duplicates": {
+        "text": 30,
+        "visual": 30,
+        "multi": 30,
+        "metadata": 30
+      },
+      "input_counts": {
+        "text": 30,
+        "visual": 30,
+        "multi": 30,
+        "metadata": 30
+      }
+    },
+    {
+      "label": "my_account_0416_0333",
+      "category": "my_account",
+      "path": "연구소\\threads_live_report_0416_0333_embeddings_v2_final.pkl",
+      "added": {
+        "text": 0,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 0
+      },
+      "duplicates": {
+        "text": 30,
+        "visual": 30,
+        "multi": 30,
+        "metadata": 30
+      },
+      "input_counts": {
+        "text": 30,
+        "visual": 30,
+        "multi": 30,
+        "metadata": 30
+      }
+    },
+    {
+      "label": "my_account_0417_0123",
+      "category": "my_account",
+      "path": "연구소\\threads_live_report_0417_0123_embeddings_v2_final.pkl",
+      "added": {
+        "text": 0,
+        "visual": 0,
+        "multi": 0,
+        "metadata": 0
+      },
+      "duplicates": {
+        "text": 30,
+        "visual": 30,
+        "multi": 30,
+        "metadata": 30
+      },
+      "input_counts": {
+        "text": 30,
+        "visual": 30,
+        "multi": 30,
+        "metadata": 30
+      }
+    }
+  ]
+}

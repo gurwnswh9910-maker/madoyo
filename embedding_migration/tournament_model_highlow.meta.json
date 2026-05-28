@@ -1,0 +1,27 @@
+{
+  "artifact_name": "tournament_model_highlow.pkl",
+  "objective": "Current promoted tournament model trained with high-low only pair construction while keeping legacy reg/hurdle fixed.",
+  "tour_input_spec": {
+    "name": "highlow_raw_only",
+    "input_mode": "raw_only",
+    "high_cut": 90.0,
+    "low_cut": 40.0,
+    "high_low_pairs": 3000,
+    "hidden_1": 48,
+    "hidden_2": 12,
+    "alpha": 0.0005,
+    "max_iter": 35,
+    "recent_weight_power": 1.0,
+    "seed": 42
+  },
+  "train_stats": {
+    "mapped_rows": 3051,
+    "high_rows": 276,
+    "low_rows": 1197,
+    "high_low_pairs_kept": 3000,
+    "tour_rows": 6000,
+    "input_mode": "raw_only",
+    "input_dim": 6144,
+    "recent_weight_power": 1.0
+  }
+}

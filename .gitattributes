@@ -1,5 +1,4 @@
 * text=auto
-
 *.py text eol=lf
 *.json text eol=lf
 *.md text eol=lf
@@ -15,7 +14,6 @@
 *.sh text eol=lf
 *.bat text eol=crlf
 *.ps1 text eol=crlf
-
 *.png binary
 *.jpg binary
 *.jpeg binary
@@ -25,3 +23,7 @@
 *.pdf binary
 *.woff binary
 *.woff2 binary
+upgrade_final_vector/*.pkl filter=lfs diff=lfs merge=lfs -text
+embedding_migration/*.pkl filter=lfs diff=lfs merge=lfs -text
+data_cache.pkl filter=lfs diff=lfs merge=lfs -text
+연구소/ml연구소/20260501_uploaded_pairwise_ranker/*.pkl filter=lfs diff=lfs merge=lfs -text

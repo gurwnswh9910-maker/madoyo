@@ -1,51 +1,109 @@
-# 개발 환경 및 민감한 파일/폴더 전체 무시
-*
+# Sensitive environment files
+.env
+.env.*
+!.env.example
+!.env.template
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.template
 
-# 제외할(Git에 올릴) 필수 서버/클라이언트 관련 폴더만 허용
-!/backend/
-!/backend/**
-!/client-next/
-!/client-next/**
-!/knowledge_base/
-!/knowledge_base/L1-Maps/
-!/knowledge_base/L1-Maps/copy_scorer_research_hub.md
-!/knowledge_base/L2-Atomic/
-!/knowledge_base/L2-Atomic/engines/
-!/knowledge_base/L2-Atomic/engines/benchmark_record_flow.md
-!/render.yaml
-!/.gitignore
-!/backend/embedding_migration/*.pkl
-
-# 단, 허용된 폴더 안에서도 민감한 파일/임시 파일은 무시
-# --- Backend 무시 ---
-backend/.env
-backend/.venv
-backend/__pycache__/
-backend/*.pyc
-backend/*.pyo
-backend/**/__pycache__/
-backend/**/*.pyc
-backend/**/*.pyo
-backend/temp_uploads/
-backend/media/
-backend/*.log
-backend/*.err
-backend/*.out
-backend/test_results_v9.log
-
-# --- Client 무시 ---
-client-next/.env
-client-next/.env.local
-client-next/.env.*
-client-next/node_modules/
-client-next/.next/
-client-next/out/
-client-next/build/
-
-# 추가적인 보안(혹시 모를 대용량/민감 파일 백업 차단)
-*.pkl
-*.env
-*.exe
-*.pkg
+# Local-only config and secrets
+*.local
+*.local.*
+*.secret
+*.secrets
+secrets/
+credentials/
 *.key
 *.pem
+*.p12
+*.pfx
+*credentials*.json
+*service-account*.json
+config.local.*
+local_config.*
+
+# Local tool/IDE config
+.agent/
+.claude/
+.render-cli/
+.vscode/
+_agents/
+
+# Python local/runtime output
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Node local/runtime output
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# Local run artifacts
+*.log
+*.log.*
+*.err
+*.err.*
+*.out
+*.out.*
+*.bak
+*.bak_*
+tmp/
+scratch/
+downloaded_files/
+**/downloaded_files/
+
+# Temporary automation share guardrails
+자동화/analysis_runs/
+자동화/keyword_research_runs/
+자동화/organizer_research_runs/
+자동화/threads_browser_profile/
+자동화/threads_logged_out_profile/
+자동화/자동화참조/
+자동화/실패엑셀/
+수동화/수동화 미디어/
+수동화/수동화참조/
+수동화/완료/
+반자동/benchmark_runs/
+반자동/반자동결과/
+반자동/반자동참조/*
+!반자동/반자동참조/.gitkeep
+작동중코드/embedding_end/
+작동중코드/embedding_waiting/
+작동중코드/diagnose_embedding.py
+작동중코드/repro_400.py
+
+# Temporary large/local data block. Use git add -f or Git LFS intentionally.
+*.pkl
+*.pkl.bak*
+*.npz
+*.npy
+*.csv
+*.xlsx
+*.xls
+*.xlsm
+*.sqlite
+*.db
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.gif
+*.mp4
+*.mov
+*.html
+
+# Shared runtime vector artifact. The pickle is tracked intentionally through Git LFS.
+!upgrade_final_vector/
+!upgrade_final_vector/*.pkl
+!upgrade_final_vector/*.json
+!upgrade_final_vector/*.md
+upgrade_final_vector/*_diskstore/
+upgrade_final_vector/source_vectors/
