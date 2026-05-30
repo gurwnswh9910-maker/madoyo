@@ -1,0 +1,38 @@
+{
+  "artifact": "C:\\Users\\ding9\\Desktop\\madoyo\\embedding_migration\\copy_scorer_soft_ensemble_v1.pkl",
+  "version": "copy_scorer_soft_ensemble_v1",
+  "elapsed_sec": 16.681,
+  "training_rows": 3051,
+  "text_pair_stats": {
+    "high_cut": 85.0,
+    "low_cut": 40.0,
+    "requested_count": 3000,
+    "high_size": 458,
+    "low_size": 1220
+  },
+  "good_anchor_stats": {
+    "high_cut": 85.0,
+    "low_cut": 40.0,
+    "requested_count": 14400,
+    "high_size": 458,
+    "low_size": 1220
+  },
+  "good_pair_stats": {
+    "pool_cut": 75.0,
+    "min_gap": 3.0,
+    "requested_count": 33600,
+    "pool_size": 763,
+    "eligible_pairs": 225456,
+    "sampled_with_replacement": false
+  },
+  "weights": {
+    "text_sum_prob": 0.75,
+    "good_copeland": 1.5,
+    "vector_sum_prob": 0.25,
+    "binary_prior": 0.5
+  },
+  "validation_reference": {
+    "best_research_name": "scorefusion__good=curriculum_30_70_mixed_good75_gap3_n48000_a1e-05__tm=sum_prob_gm=copeland_vm=sum_prob__tw0.75_gw1.5_vw0.25_bw0.5",
+    "top5_rank_sum_mean": 42.6
+  }
+}
