@@ -1,0 +1,4 @@
+interface:
+  display_name: "Threads Webhook Dashboard Subscribe"
+  short_description: "Connect Threads webhook topics from Meta Dashboard"
+  default_prompt: "Use $threads-webhook-dashboard-subscribe to connect a logged-in Meta Dashboard app URL to the Threads replies webhook safely."
